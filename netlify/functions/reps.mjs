@@ -78,10 +78,35 @@ export default async (req) => {
     const data = await store.get(id, { type: "json" });
     return data ? json(data, 200, who.role) : new Response("Not found", { status: 404 });
   }
+  // Reps (their own review) and managers can add or remove accounts picked from the call log.
+  if (req.method === "PATCH") {
+    if (who.role === "viewer") return new Response("This code can view reviews but not change them.", { status: 403 });
+    const body = await req.json().catch(() => ({}));
+    const data = await store.get(id, { type: "json" });
+    if (!data) return new Response("Not found", { status: 404 });
+    const k = (x) => String((x && x.name) || x || "").trim().toLowerCase();
+    let adds = Array.isArray(data.acctAdds) ? data.acctAdds : [];
+    for (const a of (Array.isArray(body.add) ? body.add : []).slice(0, 200)) {
+      if (!a || !a.name || adds.some((x) => k(x) === k(a))) continue;
+      adds.push({ name: String(a.name).slice(0, 200), code: String(a.code || "").slice(0, 40), call: String(a.call || "").slice(0, 200), prospect: !!a.prospect, by: who.role, at: new Date().toISOString() });
+    }
+    const rm = new Set((Array.isArray(body.remove) ? body.remove : []).map(k));
+    adds = adds.filter((x) => !rm.has(k(x)));
+    data.acctAdds = adds;
+    await store.setJSON(id, data, { metadata: { name: data.name, savedAt: data.savedAt, summary: data.summary } });
+    return json({ ok: true, acctAdds: adds }, 200, who.role);
+  }
   if (who.role !== "manager") return new Response("This code can view reviews but not change them.", { status: 403 });
 
   if (req.method === "PUT") {
     const body = await req.json();
+    // Keep accounts a rep added since the manager last loaded this review.
+    const prev = await store.get(id, { type: "json" }).catch(() => null);
+    if (prev && Array.isArray(prev.acctAdds)) {
+      const k = (x) => String((x && x.name) || "").trim().toLowerCase();
+      const have = new Set((body.acctAdds || []).map(k));
+      body.acctAdds = [...(body.acctAdds || []), ...prev.acctAdds.filter((x) => !have.has(k(x)))];
+    }
     await store.setJSON(id, body, {
       metadata: { name: body.name, savedAt: body.savedAt, summary: body.summary },
     });
