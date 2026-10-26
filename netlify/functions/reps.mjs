@@ -1,4 +1,4 @@
-// Saved rep reviews for the Rep Account Review app.
+/ Saved rep reviews for the Rep Account Review app.
 // Storage: Netlify Blobs, store "rep-reviews", one JSON blob per rep.
 // Access (header x-access-code):
 //   ACCESS_CODE                 -> manager: sees, saves and deletes every rep.
@@ -17,9 +17,12 @@ const json = (data, status = 200, role) =>
 
 // Codes are compared ignoring case, spaces and dashes, so "8r2p xd9q" works the same as "8R2P-XD9Q".
 const norm = (c) => String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+let MAP_BAD = false;
 function repMap() {
   let map = {};
-  try { map = JSON.parse(process.env.REP_CODES || "{}"); } catch (e) { map = {}; }
+  // Tolerate smart quotes and stray line breaks pasted into the Netlify field.
+  const raw = String(process.env.REP_CODES || "{}").replace(/[\u201C\u201D\u201E\u2033]/g, '"').replace(/[\u2018\u2019]/g, "'").replace(/[\r\n]+/g, " ").trim();
+  try { map = JSON.parse(raw); MAP_BAD = false; } catch (e) { map = {}; MAP_BAD = !!process.env.REP_CODES; }
   const out = {};
   for (const [k, v] of Object.entries(map)) out[norm(k)] = String(v).trim().toLowerCase();
   return out;
@@ -40,7 +43,10 @@ export default async (req) => {
   if (!process.env.ACCESS_CODE && !process.env.REP_CODES)
     return new Response("ACCESS_CODE is not set on this Netlify site.", { status: 401 });
   const who = whoIs((req.headers.get("x-access-code") || "").trim());
-  if (!who) return new Response("Unauthorized", { status: 401 });
+  if (!who) {
+    repMap();
+    return new Response(MAP_BAD ? "REP_CODES in Netlify is not valid JSON. Re-paste it exactly as one line." : "Unauthorized", { status: 401, headers: MAP_BAD ? { "x-codes-bad": "1" } : {} });
+  }
 
   const store = getStore("rep-reviews");
   const id = new URL(req.url).searchParams.get("id");
