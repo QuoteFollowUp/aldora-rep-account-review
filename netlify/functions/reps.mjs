@@ -1,4 +1,6 @@
-/ Saved rep reviews for the Rep Account Review app.
+import { getStore } from "@netlify/blobs";
+
+// Saved rep reviews for the Rep Account Review app.
 // Storage: Netlify Blobs, store "rep-reviews", one JSON blob per rep.
 // Access (header x-access-code):
 //   ACCESS_CODE                 -> manager: sees, saves and deletes every rep.
@@ -7,7 +9,6 @@
 //                                  Use "@view" for a view-only code that sees every rep (e.g. the COO).
 //   rep-id is the rep name in lowercase with hyphens, e.g. "Christian Kelley" -> "christian-kelley".
 //   Manager list responses add hasCode per rep and an x-missing-reps header (rep codes with no saved review).
-import { getStore } from "@netlify/blobs";
 
 const json = (data, status = 200, role) =>
   new Response(JSON.stringify(data), {
