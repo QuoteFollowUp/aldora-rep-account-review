@@ -4,6 +4,7 @@
 //   ACCESS_CODE                 -> manager: sees, saves and deletes every rep.
 //   REP_CODES (JSON env var)    -> {"code":"rep-id", ...}. A rep code can only read that one rep.
 //                                  Use "*" as the rep-id to make another manager code.
+//                                  Use "@view" for a view-only code that sees every rep (e.g. the COO).
 //   rep-id is the rep name in lowercase with hyphens, e.g. "Christian Kelley" -> "christian-kelley".
 //   Manager list responses add hasCode per rep and an x-missing-reps header (rep codes with no saved review).
 import { getStore } from "@netlify/blobs";
@@ -30,7 +31,9 @@ function whoIs(code) {
   if (admin && c === admin) return { role: "manager" };
   const rep = repMap()[c];
   if (!rep) return null;
-  return rep === "*" ? { role: "manager" } : { role: "rep", rep };
+  if (rep === "*") return { role: "manager" };
+  if (rep === "@view") return { role: "viewer" };
+  return { role: "rep", rep };
 }
 
 export default async (req) => {
@@ -46,7 +49,7 @@ export default async (req) => {
   if (req.method === "GET" && !id) {
     const { blobs } = await store.list();
     const keys = blobs.map((b) => b.key).filter((k) => !isRep || k === who.rep);
-    const coded = new Set(Object.values(repMap()).filter((v) => v !== "*"));
+    const coded = new Set(Object.values(repMap()).filter((v) => v !== "*" && v !== "@view"));
     const items = await Promise.all(
       keys.map(async (k) => {
         const m = await store.getMetadata(k);
@@ -68,7 +71,7 @@ export default async (req) => {
     const data = await store.get(id, { type: "json" });
     return data ? json(data, 200, who.role) : new Response("Not found", { status: 404 });
   }
-  if (isRep) return new Response("Reps can view their review but not change it.", { status: 403 });
+  if (who.role !== "manager") return new Response("This code can view reviews but not change them.", { status: 403 });
 
   if (req.method === "PUT") {
     const body = await req.json();
