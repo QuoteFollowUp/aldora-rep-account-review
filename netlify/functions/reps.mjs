@@ -93,6 +93,11 @@ export default async (req) => {
     const rm = new Set((Array.isArray(body.remove) ? body.remove : []).map(k));
     adds = adds.filter((x) => !rm.has(k(x)));
     data.acctAdds = adds;
+    if (body.aliases && typeof body.aliases === "object") {
+      const al = data.aliases && typeof data.aliases === "object" ? data.aliases : {};
+      for (const [k, v] of Object.entries(body.aliases).slice(0, 500)) { const key = String(k).slice(0, 200); if (!v) delete al[key]; else al[key] = String(v).slice(0, 200); }
+      data.aliases = al;
+    }
     await store.setJSON(id, data, { metadata: { name: data.name, savedAt: data.savedAt, summary: data.summary } });
     return json({ ok: true, acctAdds: adds }, 200, who.role);
   }
@@ -107,6 +112,7 @@ export default async (req) => {
       const have = new Set((body.acctAdds || []).map(k));
       body.acctAdds = [...(body.acctAdds || []), ...prev.acctAdds.filter((x) => !have.has(k(x)))];
     }
+    if (prev && prev.aliases && typeof prev.aliases === "object") body.aliases = { ...prev.aliases, ...(body.aliases || {}) };
     await store.setJSON(id, body, {
       metadata: { name: body.name, savedAt: body.savedAt, summary: body.summary },
     });
