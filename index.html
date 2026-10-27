@@ -446,6 +446,10 @@ body.sheet-open{overflow:hidden}
 .mv-sel{font-size:.76rem;padding:2px 26px 2px 6px;min-height:28px;margin-left:6px;max-width:190px;vertical-align:middle}
 @media (pointer:coarse){.mv-sel{min-height:36px;font-size:16px}}
 .add-warn{color:var(--down);font-weight:600;font-size:.9rem;line-height:1.4;margin:0 0 10px;text-wrap:pretty}
+.sync-line{display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between;font-size:.82rem;color:var(--muted);margin:-4px 0 12px}
+.sync-code b{font-family:ui-monospace,Menlo,monospace;letter-spacing:.08em;color:var(--ink)}
+.ver-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));z-index:9999;background:var(--accent-700,#0b5d73);color:#fff;border:0;border-radius:999px;padding:12px 20px;font:inherit;font-size:.92rem;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100vw - 24px)}
+@media print{.ver-bar,.sync-line{display:none!important}}
 /* summary section heads */
 .sechead{display:flex;flex-direction:column;gap:2px;border-top:3px solid var(--ink);padding-top:var(--s2);position:relative;margin-top:var(--s2)}
 .sechead::before{content:"";position:absolute;left:0;right:0;top:2px;border-top:1px solid var(--ink)}
@@ -651,7 +655,7 @@ body.sheet-open{overflow:hidden}
         <button id="switchCode" type="button">Use a different code</button>
       </div>
       <span class="status muted" id="saveInfo"></span>
-      <span class="muted" style="font-size:.72rem;letter-spacing:.06em">Version 2026-10-26h</span>
+      <span class="muted" style="font-size:.72rem;letter-spacing:.06em"><span data-appver>Version 2026-10-27a</span></span>
       <form id="codeForm" class="codeform" hidden autocomplete="off">
         <label for="codeIn" class="kicker">Access code</label>
         <input id="codeIn" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Enter your code">
@@ -948,12 +952,12 @@ const STORE={
   put(id,v){return this.mode==='cloud'?this.call('PUT',id,v):IDB.put(id,v)},
   del(id){return this.mode==='cloud'?this.call('DELETE',id):IDB.del(id)}
 };
-let CURRENT_ID='';
+let CURRENT_ID='', SYNC=null;
 const fmtStamp=iso=>{const d=new Date(iso);return isNaN(d)?'':d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})+' '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})};
 async function refreshRepList(items){
   if(!items)items=await STORE.list();
   items.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
-  $('#repSel').innerHTML=`<option value="">${items.length?'Choose a saved rep…':'No saved reps yet'}</option>`+items.map(x=>`<option value="${esc(x.id)}" ${x.id===CURRENT_ID?'selected':''}>${esc(x.name)}${x.summary?.period?' · '+esc(x.summary.period):''} · saved ${esc(fmtStamp(x.savedAt))}${x.hasCode===false?' · no rep code':''}</option>`).join('');
+  $('#repSel').innerHTML=`<option value="">${items.length?'Choose a saved rep…':'No saved reps yet'}</option>`+items.map(x=>`<option value="${esc(x.id)}" ${x.id===CURRENT_ID?'selected':''}>${esc(x.name)}${x.summary?.period?' · '+esc(x.summary.period):''} · saved ${esc(fmtStamp(x.savedAt))}${x.changedAt&&x.changedAt>(x.savedAt||'')&&x.changedBy==='rep'?' · rep changes '+esc(fmtStamp(x.changedAt)):''}${x.hasCode===false?' · no rep code':''}</option>`).join('');
   $('#delRep').disabled=!CURRENT_ID;
 }
 function snapshot(){
@@ -976,7 +980,7 @@ function snapshot(){
     acctAdds:ADDS,
     summary:MODEL?{accounts:MODEL.accounts.length,total:Math.round(MODEL.T.ytd),change:MODEL.T.chg,period:MODEL.periodText}:null};
 }
-async function saveRep(){
+async function saveRep(){ setTimeout(()=>{if(CURRENT_ID)STORE.get(CURRENT_ID).then(d=>{if(d){LOADED={id:CURRENT_ID,stamp:d.changedAt||d.savedAt};SYNC={savedAt:d.savedAt,changedAt:d.changedAt,changedBy:d.changedBy,log:d.log||[]};putAliases(d.aliases||{});ADDS=d.acctAdds||[];saveAdds();$('#build').click()}}).catch(()=>{})},2500);
   const name=$('#repName').value.trim();
   if(!name){$('#repName').focus();$('#saveInfo').innerHTML='<span class="neg">Enter the rep name before saving.</span>';return}
   if(!SALES){$('#saveInfo').innerHTML='<span class="neg">Load sales data before saving.</span>';return}
@@ -996,6 +1000,7 @@ async function loadRep(id){
   if(!id){clearAll();return}
   $('#saveInfo').textContent='Loading…';
   try{
+    if(STORE.mode==='cloud')await flushPending(id);
     const d=await STORE.get(id); if(!d)throw new Error('Not found.');
     clearAll(); CURRENT_ID=id;
     SFILES=(d.sfiles||[]).map(f=>({...f,start:f.start?new Date(f.start):null,end:f.end?new Date(f.end):null}));
@@ -1005,7 +1010,9 @@ async function loadRep(id){
     if(d.budget){try{localStorage.setItem('rar-budget:'+String(d.name||'').trim(),JSON.stringify(d.budget))}catch(e){}}
     if(Array.isArray(d.acctAdds)){try{localStorage.setItem('rar-adds:'+String(d.name||'').trim(),JSON.stringify(d.acctAdds))}catch(e){}}
     if(d.trip){try{localStorage.setItem('rar-trip:'+String(d.name||'').trim(),JSON.stringify(d.trip))}catch(e){}}
-    if(d.aliases){const a={...getAliases(),...d.aliases};/* server links win */try{localStorage.setItem('rar-aliases',JSON.stringify(a))}catch(e){}}
+    if(STORE.mode==='cloud'){putAliases(d.aliases||{});try{localStorage.setItem('rar-adds:'+String(d.name||'').trim(),JSON.stringify(Array.isArray(d.acctAdds)?d.acctAdds:[]))}catch(e){}}
+    else if(d.aliases)putAliases({...getAliases(),...d.aliases});
+    LOADED={id,stamp:d.changedAt||d.savedAt||''}; SYNC={savedAt:d.savedAt,changedAt:d.changedAt,changedBy:d.changedBy,log:Array.isArray(d.log)?d.log:[]};
     refreshSales(); $('#onlyCalled').checked=!!st.onlyCalled;
     if(CALLS){$('#stCalls').innerHTML=`<span class="pos">${esc(d.callsFile||`Loaded ${CALLS.length} calls.`)}</span>`;$('#dropCalls').classList.add('ok')}
     await refreshRepList();
@@ -1233,8 +1240,45 @@ function regionOf(route){
 /* ---------- name matching ---------- */
 const STOP=new Set(['inc','llc','co','company','corp','corporation','the','of','and','dba','glass','mirror','ltd','formerly','formely']);
 const toks=s=>new Set(String(s).toLowerCase().replace(/&/g,' and ').replace(/\(.*?\)/g,' ').replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w=>w&&!STOP.has(w)));
-function getAliases(){try{return JSON.parse(localStorage.getItem('rar-aliases')||'{}')}catch(e){return{}}}
-function setAlias(callName,acct){const a=getAliases();if(acct)a[callName]=acct;else delete a[callName];try{localStorage.setItem('rar-aliases',JSON.stringify(a))}catch(e){}}
+const aliasKey=()=>'rar-aliases:'+($('#repName').value.trim()||'_');
+function getAliases(){try{const v=localStorage.getItem(aliasKey());if(v!==null)return JSON.parse(v)||{};return STORE.mode==='cloud'?{}:JSON.parse(localStorage.getItem('rar-aliases')||'{}')}catch(e){return{}}}
+function putAliases(a){try{localStorage.setItem(aliasKey(),JSON.stringify(a||{}))}catch(e){}}
+function setAlias(callName,acct){const a=getAliases();if(acct)a[callName]=acct;else delete a[callName];putAliases(a)}
+/* ---------- keeping every device on the same saved copy ---------- */
+let LOADED={id:'',stamp:''};
+const pendKey=id=>'rar-pending:'+id;
+function getPend(id){try{return JSON.parse(localStorage.getItem(pendKey(id))||'[]')}catch(e){return[]}}
+async function sendPatch(body){
+  if(STORE.mode!=='cloud'||!CURRENT_ID||STORE.role==='viewer')return 'local';
+  try{const r=await STORE.call('PATCH',CURRENT_ID,body);if(r&&r.changedAt)LOADED={id:CURRENT_ID,stamp:r.changedAt};return 'ok'}
+  catch(e){const p=getPend(CURRENT_ID);p.push(body);try{localStorage.setItem(pendKey(CURRENT_ID),JSON.stringify(p))}catch(_){}return 'queued'}
+}
+async function flushPending(id){
+  const p=getPend(id);if(!p.length||STORE.mode!=='cloud'||STORE.role==='viewer')return 0;let sent=0;
+  for(const b of p){try{await STORE.call('PATCH',id,b);sent++}catch(e){break}}
+  try{const rest=p.slice(sent);rest.length?localStorage.setItem(pendKey(id),JSON.stringify(rest)):localStorage.removeItem(pendKey(id))}catch(e){}
+  return sent;
+}
+const saveMsg=r=>r==='ok'?' Saved to the shared list.':r==='queued'?' <span class="neg">Not sent yet (no connection). It will send the next time the app opens online.</span>':'';
+async function checkFresh(){
+  if(STORE.mode!=='cloud'||!CURRENT_ID||document.hidden)return;
+  try{await flushPending(CURRENT_ID);const d=await STORE.get(CURRENT_ID);const st=d&&(d.changedAt||d.savedAt);
+    if(st&&LOADED.id===CURRENT_ID&&st!==LOADED.stamp){await loadRep(CURRENT_ID);$('#saveInfo').innerHTML='<span class="pos">Updated with the latest saved changes.</span>'}}catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkFresh();checkVersion()}});
+window.addEventListener('online',checkFresh);
+setInterval(checkFresh,180000);
+const APP_VERSION=(document.querySelector('[data-appver]')||{}).textContent||'';
+async function checkVersion(){
+  if(!/^https?:/.test(location.protocol))return;
+  try{const t=await (await fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'})).text();const m=t.match(/data-appver[^>]*>([^<]+)</);
+    if(m&&APP_VERSION&&m[1].trim()!==APP_VERSION.trim()&&!$('#verBar')){const b=document.createElement('button');b.id='verBar';b.type='button';b.className='ver-bar';b.innerHTML='A newer version of the app is available. <b>Tap to update</b>';b.onclick=()=>location.reload();document.body.appendChild(b)}}catch(e){}
+}
+setTimeout(checkVersion,1500);
+function checkCode(M){
+  const t=[M.accounts.length,Math.round(M.T.ytd),...M.accounts.map(a=>nkey(a.name)+':'+a.calls.length).sort()].join('|');let h=0;for(let i=0;i<t.length;i++)h=(h*33+t.charCodeAt(i))|0;
+  return (h>>>0).toString(36).toUpperCase().slice(-4).padStart(4,'0');
+}
 function callId(c){const t=[c.date instanceof Date?c.date.toISOString().slice(0,10):String(c.date).slice(0,10),c.customer,c.contact,String(c.notes||'').slice(0,60)].join('|');let h=0;for(let i=0;i<t.length;i++)h=(h*31+t.charCodeAt(i))|0;return 'call:'+(h>>>0).toString(36)}
 function matchCalls(accounts,calls){
   const AL=getAliases(), byName=Object.fromEntries(accounts.map(a=>[a.name,a]));
@@ -1371,7 +1415,7 @@ async function linkCalls(map){
   Object.entries(map).forEach(([k,v])=>setAlias(k,v));
   const n=Object.keys(map).length, to=[...new Set(Object.values(map))].filter(v=>v!=='__none');
   let msg=to.length?`Linked ${n} call-log name${n>1?'s':''} to <b>${esc(to.join(', '))}</b>.`:'Marked as not on this list.';
-  if(STORE.mode==='cloud'&&CURRENT_ID&&STORE.role!=='viewer'){try{await STORE.call('PATCH',CURRENT_ID,{aliases:map});msg+=' Saved to the shared list.'}catch(e){msg+=' Saved on this device only.'}}
+  msg+=saveMsg(await sendPatch({aliases:map}));
   $('#build').click();$('#saveInfo').innerHTML=`<span class="pos">${msg}</span>`;
 }
 async function addToList(callName){
@@ -1380,17 +1424,24 @@ async function addToList(callName){
   if(!ADDS.some(a=>nkey(a.name)===nkey(e.name)))ADDS.push({...e,at:new Date().toISOString()});
   saveAdds(); if(x&&x.name!==callName)setAlias(callName,x.name);
   let msg=`Added <b>${esc(e.name)}</b>${e.prospect?' (no sales in the file yet)':''}.`;
-  if(STORE.mode==='cloud'&&CURRENT_ID&&STORE.role!=='viewer'){try{await STORE.call('PATCH',CURRENT_ID,{add:[e]});msg+=' Saved to the shared list.'}catch(err){msg+=' Saved on this device only.'}}
+  if(STORE.mode==='cloud'&&CURRENT_ID&&STORE.role!=='viewer')msg+=saveMsg(await sendPatch({add:[e],...(x&&x.name!==callName?{aliases:{[callName]:x.name}}:{})}));
   else msg+=STORE.role==='manager'||STORE.mode!=='cloud'?' Click Save this rep to share it.':'';
   $('#build').click(); $('#saveInfo').innerHTML=`<span class="pos">${msg}</span>`;
 }
 async function removeAdd(name){
   const a=ADDS.find(x=>x.name===name);ADDS=ADDS.filter(x=>x.name!==name);saveAdds();
   if(a&&a.call&&a.call!==a.name)setAlias(a.call,'');
-  if(STORE.mode==='cloud'&&CURRENT_ID&&STORE.role!=='viewer'){try{await STORE.call('PATCH',CURRENT_ID,{remove:[name]})}catch(err){}}
+  await sendPatch({remove:[name],...(a&&a.call&&a.call!==a.name?{aliases:{[a.call]:''}}:{})});
   $('#build').click(); $('#saveInfo').innerHTML=`Removed <b>${esc(name)}</b> from the list.`;
 }
 document.addEventListener('click',e=>{const b=e.target.closest('[data-unadd]');if(b){e.preventDefault();removeAdd(b.dataset.unadd)}});
+function syncHTML(M){
+  const links=Object.keys(getAliases()).length, code=checkCode(M);
+  const who=b=>b==='manager'?'manager':b==='rep'?'rep':b||'';
+  const S=SYNC&&CURRENT_ID?SYNC:null, log=S?S.log.slice(-40).reverse():[];
+  const line=S?`Saved copy: files from ${esc(fmtStamp(S.savedAt))}${S.changedAt&&S.changedAt!==S.savedAt?` · last change ${esc(fmtStamp(S.changedAt))} by ${esc(who(S.changedBy))}`:''}`:(STORE.mode==='cloud'?'Not saved to the shared list yet.':'On this device only.');
+  return `<div class="sync-line"><span>${line} · ${ADDS.length} added · ${links} call link${links===1?'':'s'}</span><span class="sync-code" title="Compare with the rep: the same code means the same accounts, sales and calls">Check code <b>${code}</b></span></div>${log.length?`<details class="card noprint"><summary>Changes made in the app (${S.log.length})</summary><div class="tbl"><table class="unm-t"><tbody>${log.map(l=>`<tr><td style="white-space:nowrap">${esc(fmtStamp(l.at))}</td><td>${esc(who(l.by))}</td><td>${esc(l.what)}</td></tr>`).join('')}</tbody></table></div></details>`:''}`;
+}
 function inList(accounts){
   const base=$('#acctList').value.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
   if(!base.length)return null;
@@ -1515,6 +1566,7 @@ function render(){
   sp.innerHTML=`
   <h2>${esc(M.rep||'Rep')} · ${M.accounts.length} accounts · ${esc(M.periodText)}</h2>
   <div class="muted" style="font-style:italic;margin-top:-12px">${M.listInfo?`Filtered to the rep's account list: ${M.listInfo.kept} of ${M.listInfo.lines} names matched.`:`Every account in the sales file. No account list loaded.`}</div>
+  ${syncHTML(M)}
   <div id="budStrip">${budgetStripHTML(M)}</div>
   <div class="sechead"><h3>Sales</h3><div class="muted">Invoiced sales from the sales file. Everything down to the Quotes section is sales.</div></div>
   <div class="tiles">
