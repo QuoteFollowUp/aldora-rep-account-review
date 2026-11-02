@@ -74,6 +74,20 @@ export default async (req) => {
   if (!id || !/^[a-z0-9-]{1,80}$/.test(id)) return new Response("Bad id", { status: 400 });
   if (isRep && id !== who.rep) return new Response("Forbidden", { status: 403 });
 
+  const sp = new URL(req.url).searchParams;
+  if (req.method === "GET" && who.role === "manager" && (sp.get("backups") || sp.get("backup"))) {
+    const bak = getStore("rep-reviews-backup");
+    if (sp.get("backup")) {
+      const key = String(sp.get("backup"));
+      if (!key.startsWith(id + "/")) return new Response("Bad backup", { status: 400 });
+      const d = await bak.get(key, { type: "json" });
+      return d ? json(d, 200, who.role) : new Response("Not found", { status: 404 });
+    }
+    const { blobs } = await bak.list({ prefix: id + "/" });
+    const items = await Promise.all(blobs.map(async (b) => ({ key: b.key, ...((await bak.getMetadata(b.key))?.metadata || {}) })));
+    items.sort((a, b) => String(b.savedAt || b.key).localeCompare(String(a.savedAt || a.key)));
+    return json(items, 200, who.role);
+  }
   if (req.method === "GET") {
     const data = await store.get(id, { type: "json" });
     return data ? json(data, 200, who.role) : new Response("Not found", { status: 404 });
@@ -121,6 +135,16 @@ export default async (req) => {
     const prev = await store.get(id, { type: "json" }).catch(() => null);
     // The server copy is the record for accounts added and calls linked in the app (those are saved as they happen),
     // so a manager save of new files never overwrites what a rep did on their phone.
+    // Keep the last 15 saves of every rep so a bad upload can be undone ("Restore an earlier save").
+    if (prev) {
+      try {
+        const bak = getStore("rep-reviews-backup"), at = new Date().toISOString();
+        await bak.setJSON(id + "/" + at, prev, { metadata: { savedAt: prev.savedAt || "", replacedAt: at, summary: prev.summary || null } });
+        const { blobs } = await bak.list({ prefix: id + "/" });
+        const old = blobs.map((b) => b.key).sort().reverse().slice(15);
+        await Promise.all(old.map((k) => bak.delete(k)));
+      } catch (e) {}
+    }
     if (prev && Array.isArray(prev.acctAdds)) body.acctAdds = prev.acctAdds;
     if (prev && prev.aliases && typeof prev.aliases === "object") body.aliases = { ...(body.aliases || {}), ...prev.aliases };
     body.log = [...(prev && Array.isArray(prev.log) ? prev.log : []), { at: body.savedAt || new Date().toISOString(), by: who.role, what: "Saved review with new files" }].slice(-300);
