@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { whoIs as sharedWho, listIsSet, repsFor } from "../lib/access.mjs";
 
 // Saved rep reviews for the Rep Account Review app.
 // Storage: Netlify Blobs, store "rep-reviews", one JSON blob per rep.
@@ -9,6 +10,9 @@ import { getStore } from "@netlify/blobs";
 //                                  Use "@view" for a view-only code that sees every rep (e.g. the COO).
 //   rep-id is the rep name in lowercase with hyphens, e.g. "Christian Kelley" -> "christian-kelley".
 //   Manager list responses add hasCode per rep and an x-missing-reps header (rep codes with no saved review).
+//   REP_ACCESS_CODES (shared, team-level Netlify variable) -> the same Call Log codes every Aldora app uses:
+//     rep -> that rep's review only;  branch manager -> the reviews of their branch's reps (read only);
+//     ownership / view-only / Fred -> every review, read only.  ACCESS_CODE stays the save/upload code.
 
 const json = (data, status = 200, role) =>
   new Response(JSON.stringify(data), {
@@ -34,14 +38,21 @@ function whoIs(code) {
   const admin = norm(process.env.ACCESS_CODE);
   if (admin && c === admin) return { role: "manager" };
   const rep = repMap()[c];
-  if (!rep) return null;
+  if (!rep) {
+    const s = listIsSet() ? sharedWho(code) : null;
+    if (!s) return null;
+    const slug = (n) => String(n).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (s.role === "rep") return { role: "rep", rep: slug(s.rep) };
+    if (s.role === "all") return { role: "viewer" };
+    return { role: "branch", reps: new Set([...repsFor(s)].map(slug)) };
+  }
   if (rep === "*") return { role: "manager" };
   if (rep === "@view") return { role: "viewer" };
   return { role: "rep", rep };
 }
 
 export default async (req) => {
-  if (!process.env.ACCESS_CODE && !process.env.REP_CODES)
+  if (!process.env.ACCESS_CODE && !process.env.REP_CODES && !listIsSet())
     return new Response("ACCESS_CODE is not set on this Netlify site.", { status: 401 });
   const who = whoIs((req.headers.get("x-access-code") || "").trim());
   if (!who) {
@@ -52,19 +63,23 @@ export default async (req) => {
   const store = getStore("rep-reviews");
   const id = new URL(req.url).searchParams.get("id");
   const isRep = who.role === "rep";
+  // Which reviews this code may open: null = all
+  const allowed = who.role === "rep" ? new Set([who.rep]) : who.role === "branch" ? who.reps : null;
+  // The page only knows manager / viewer / rep. A branch manager browses like a viewer.
+  const uiRole = who.role === "branch" ? "viewer" : who.role;
 
   if (req.method === "GET" && !id) {
     const { blobs } = await store.list();
-    const keys = blobs.map((b) => b.key).filter((k) => !isRep || k === who.rep);
+    const keys = blobs.map((b) => b.key).filter((k) => !allowed || allowed.has(k));
     const coded = new Set(Object.values(repMap()).filter((v) => v !== "*" && v !== "@view"));
     const items = await Promise.all(
       keys.map(async (k) => {
         const m = await store.getMetadata(k);
-        return { id: k, ...(m?.metadata || {}), ...(isRep ? {} : { hasCode: coded.has(k) }) };
+        return { id: k, ...(m?.metadata || {}), ...(who.role === "manager" ? { hasCode: coded.has(k) } : {}) };
       })
     );
-    const res = json(items, 200, who.role);
-    if (!isRep) {
+    const res = json(items, 200, uiRole);
+    if (who.role === "manager") {
       const have = new Set(blobs.map((b) => b.key));
       res.headers.set("x-missing-reps", [...coded].filter((k) => !have.has(k)).join(","));
     }
@@ -72,15 +87,29 @@ export default async (req) => {
   }
 
   if (!id || !/^[a-z0-9-]{1,80}$/.test(id)) return new Response("Bad id", { status: 400 });
-  if (isRep && id !== who.rep) return new Response("Forbidden", { status: 403 });
+  if (allowed && !allowed.has(id)) return new Response("Forbidden", { status: 403 });
 
+  const sp = new URL(req.url).searchParams;
+  if (req.method === "GET" && who.role === "manager" && (sp.get("backups") || sp.get("backup"))) {
+    const bak = getStore("rep-reviews-backup");
+    if (sp.get("backup")) {
+      const key = String(sp.get("backup"));
+      if (!key.startsWith(id + "/")) return new Response("Bad backup", { status: 400 });
+      const d = await bak.get(key, { type: "json" });
+      return d ? json(d, 200, who.role) : new Response("Not found", { status: 404 });
+    }
+    const { blobs } = await bak.list({ prefix: id + "/" });
+    const items = await Promise.all(blobs.map(async (b) => ({ key: b.key, ...((await bak.getMetadata(b.key))?.metadata || {}) })));
+    items.sort((a, b) => String(b.savedAt || b.key).localeCompare(String(a.savedAt || a.key)));
+    return json(items, 200, who.role);
+  }
   if (req.method === "GET") {
     const data = await store.get(id, { type: "json" });
-    return data ? json(data, 200, who.role) : new Response("Not found", { status: 404 });
+    return data ? json(data, 200, uiRole) : new Response("Not found", { status: 404 });
   }
   // Reps (their own review) and managers can add or remove accounts picked from the call log.
   if (req.method === "PATCH") {
-    if (who.role === "viewer") return new Response("This code can view reviews but not change them.", { status: 403 });
+    if (who.role === "viewer" || who.role === "branch") return new Response("This code can view reviews but not change them.", { status: 403 });
     const body = await req.json().catch(() => ({}));
     const data = await store.get(id, { type: "json" });
     if (!data) return new Response("Not found", { status: 404 });
@@ -103,7 +132,10 @@ export default async (req) => {
     (Array.isArray(body.remove) ? body.remove : []).forEach((n) => what.push("Removed " + n));
     if (body.aliases && typeof body.aliases === "object") Object.entries(body.aliases).forEach(([k2, v]) => {
       if (Array.isArray(body.remove) && !v) return;
-      what.push((String(k2).startsWith("call:") ? "Moved one call" : "Linked calls for " + k2) + (v === "__none" ? " to not on this list" : v ? " to " + v : " (link cleared)"));
+      const k3 = String(k2);
+      if (k3.startsWith("excl:")) { what.push((v ? "Removed from list (not my account): " : "Restored to list: ") + k3.slice(5)); return; }
+      if (v === "__hide") { what.push("Removed from consideration (not my account): " + k3); return; }
+      what.push((k3.startsWith("call:") ? "Moved one call" : "Linked calls for " + k3) + (v === "__none" ? " to not on this list" : v ? " to " + v : " (link cleared)"));
     });
     data.log = [...(Array.isArray(data.log) ? data.log : []), ...what.slice(0, 50).map((w) => ({ at: now, by: who.role, what: String(w).slice(0, 240) }))].slice(-300);
     data.changedAt = now; data.changedBy = who.role;
@@ -118,6 +150,16 @@ export default async (req) => {
     const prev = await store.get(id, { type: "json" }).catch(() => null);
     // The server copy is the record for accounts added and calls linked in the app (those are saved as they happen),
     // so a manager save of new files never overwrites what a rep did on their phone.
+    // Keep the last 15 saves of every rep so a bad upload can be undone ("Restore an earlier save").
+    if (prev) {
+      try {
+        const bak = getStore("rep-reviews-backup"), at = new Date().toISOString();
+        await bak.setJSON(id + "/" + at, prev, { metadata: { savedAt: prev.savedAt || "", replacedAt: at, summary: prev.summary || null } });
+        const { blobs } = await bak.list({ prefix: id + "/" });
+        const old = blobs.map((b) => b.key).sort().reverse().slice(15);
+        await Promise.all(old.map((k) => bak.delete(k)));
+      } catch (e) {}
+    }
     if (prev && Array.isArray(prev.acctAdds)) body.acctAdds = prev.acctAdds;
     if (prev && prev.aliases && typeof prev.aliases === "object") body.aliases = { ...(body.aliases || {}), ...prev.aliases };
     body.log = [...(prev && Array.isArray(prev.log) ? prev.log : []), { at: body.savedAt || new Date().toISOString(), by: who.role, what: "Saved review with new files" }].slice(-300);
