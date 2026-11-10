@@ -981,7 +981,8 @@ const STORE={
   mode:'local', code:'',
   async init(){
     try{this.code=localStorage.getItem('rar-code')||''}catch(e){}
-    const hm=location.hash.match(/(?:^#|&)c=([^&]+)/);if(hm){this.code=decodeURIComponent(hm[1]);try{localStorage.setItem('rar-code',this.code);history.replaceState(null,'',location.pathname+location.search)}catch(e){}}
+    const hm=location.hash.match(/(?:^#|&)a?c=([^&]+)/); // #ac= from the Sales Hub, #c= from this page's own sign-in
+    if(hm){this.code=decodeURIComponent(hm[1]);try{localStorage.setItem('rar-code',this.code);history.replaceState(null,'',location.pathname+location.search)}catch(e){}}
     if(location.protocol==='file:')return this.local('This copy was opened as a file, not from the Netlify site, so it cannot reach the shared list. Open the Netlify link instead.');
     let r; try{r=await fetch('/api/reps',{headers:{'x-access-code':this.code},cache:'no-store'})}catch(e){return this.local('Could not reach the rep service. Check the connection and reload.')}
     if(r.status===401){if(r.headers.get('x-codes-bad')){showCodeForm('The code list on the server is damaged. Ask your manager to re-paste REP_CODES in Netlify and redeploy.');return this.local('The code list on the server could not be read.')}showCodeForm(this.code?'That code did not work. Check it and try again.':'');return this.local(this.code?'Access code not accepted.':'Enter your access code to see the shared rep list.')}
