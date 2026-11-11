@@ -1,4 +1,3 @@
-
 // Adds the Sales Hub bridge (/hub-bridge.js) to the Rep Account Review page on every load,
 // so a new index.html from Claude Design never drops the hub sign-in or the dormant sync.
 export default async (request, context) => {
