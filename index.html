@@ -1036,7 +1036,39 @@ function snapshot(){
     qfu:pruneQ(QFU),
     trip:[...TRIP],
     acctAdds:ADDS,
+    dormant:MODEL?dormantList(MODEL):null,
     summary:MODEL?{accounts:MODEL.accounts.length,total:Math.round(MODEL.T.ytd),change:MODEL.T.chg,period:MODEL.periodText}:null};
+}
+/* ---------- dormant accounts for the Sales Hub ----------
+   Same rule as the Revenue Report's "dropped" accounts: bought in 2+ earlier months, no invoice in the
+   last two full months (or the current partial month). Saved with each review and sent to the hub. */
+function dormantList(M){
+  try{
+    if(!M||!M.hasMonths||!Array.isArray(M.accounts)||!Array.isArray(M.months))return null;
+    const now=new Date(), curM=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    let ms=M.months.slice(0,M.months.indexOf(M.latest)+1), partial=null;
+    if(ms.at(-1)===curM&&ms.length>1)partial=ms.pop();
+    if(ms.length<4)return null;
+    const recent=ms.slice(-2), earlier=ms.slice(0,-2), last12=ms.slice(-12), out=[];
+    const sum=(m,ks)=>Math.round(ks.reduce((s,k)=>s+(m[k]||0),0));
+    M.accounts.forEach(a=>{const m=a.m||{};
+      const nE=earlier.filter(k=>(m[k]||0)>0).length, r=recent.reduce((s,k)=>s+(m[k]||0),0)+(partial?(m[partial]||0):0);
+      if(nE<2||r>0)return;
+      let last='';for(let i=ms.length-1;i>=0;i--)if((m[ms[i]]||0)>0){last=ms[i];break}
+      out.push({name:String(a.name||''),code:String(a.code||''),tier:a.tier||'',last,sales12:sum(m,last12),sales:sum(m,ms)});
+    });
+    out.sort((x,y)=>y.sales-x.sales||y.sales12-x.sales12);
+    return{v:1,rep:M.rep||$('#repName').value.trim(),from:ms[0],through:ms.at(-1),count:out.length,value:out.reduce((s,x)=>s+x.sales,0),list:out.slice(0,60)};
+  }catch(e){return null}
+}
+function hubDormantSync(){
+  try{
+    if(STORE.mode!=='cloud'||!CURRENT_ID||!MODEL)return;
+    const d=dormantList(MODEL);if(!d)return;
+    const k='rar-dorm:'+CURRENT_ID, sig=JSON.stringify([d.from,d.through,d.count,d.list.map(x=>x.name+'|'+x.last+'|'+x.sales)]);
+    try{if(localStorage.getItem(k)===sig)return}catch(e){}
+    STORE.call('PATCH',CURRENT_ID,{dormant:d}).then(()=>{try{localStorage.setItem(k,sig)}catch(e){}}).catch(()=>{});
+  }catch(e){}
 }
 async function saveRep(){ setTimeout(()=>{if(CURRENT_ID)STORE.get(CURRENT_ID).then(d=>{if(d){LOADED={id:CURRENT_ID,stamp:d.changedAt||d.savedAt};SYNC={savedAt:d.savedAt,changedAt:d.changedAt,changedBy:d.changedBy,log:d.log||[]};putAliases(d.aliases||{});ADDS=d.acctAdds||[];saveAdds();$('#build').click()}}).catch(()=>{})},2500);
   const name=$('#repName').value.trim();
@@ -2248,7 +2280,7 @@ $('#sheetClose').onclick=closeAcct;
 $('#acctSheet').addEventListener('click',e=>{if(e.target.id==='acctSheet')closeAcct()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#acctSheet').hidden)closeAcct()});
 /* ---------- wiring ---------- */
-$('#build').onclick=()=>{if(!SALES){if(!$('#stSales').textContent.trim())$('#stSales').innerHTML='<span class="neg">Load a sales pivot first.</span>';$('#stSales').animate([{opacity:.3},{opacity:1}],{duration:400});$('#dropSales').scrollIntoView({behavior:'smooth'});return}try{const first=$('#out').hidden;MODEL=build();render();$('#out').hidden=false;$('#xlsx').disabled=false;$('#print').disabled=false;$('#saveRep').disabled=false;showTab(first?'summary':(document.querySelector('[role=tab][aria-selected=true]')?.dataset.tab||'plan'))}catch(e){$('#stSales').innerHTML=`<span class="neg">Could not build the review: ${esc(e.message)}</span>`;console.error(e)}};
+$('#build').onclick=()=>{if(!SALES){if(!$('#stSales').textContent.trim())$('#stSales').innerHTML='<span class="neg">Load a sales pivot first.</span>';$('#stSales').animate([{opacity:.3},{opacity:1}],{duration:400});$('#dropSales').scrollIntoView({behavior:'smooth'});return}try{const first=$('#out').hidden;MODEL=build();render();hubDormantSync();$('#out').hidden=false;$('#xlsx').disabled=false;$('#print').disabled=false;$('#saveRep').disabled=false;showTab(first?'summary':(document.querySelector('[role=tab][aria-selected=true]')?.dataset.tab||'plan'))}catch(e){$('#stSales').innerHTML=`<span class="neg">Could not build the review: ${esc(e.message)}</span>`;console.error(e)}};
 $('#xlsx').onclick=exportXlsx;
 $('#saveRep').onclick=saveRep;
 $('#restoreRep').onclick=async()=>{
