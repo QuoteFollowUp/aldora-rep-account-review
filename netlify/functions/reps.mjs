@@ -234,6 +234,13 @@ export default async (req) => {
   if (req.method === "PATCH") {
     if (who.role === "viewer" || who.role === "branch") return new Response("This code can view reviews but not change them.", { status: 403 });
     const body = await req.json().catch(() => ({}));
+    // Dormant accounts for the Sales Hub, sent by the page after it builds a review. Kept in its own
+    // small store so the hub can read it fast. Does not touch the review itself.
+    if (body.dormant && !body.add && !body.remove && !body.aliases) {
+      await saveDormant(id, body.dormant);
+      return json({ ok: true }, 200, who.role);
+    }
+    if (body.dormant) await saveDormant(id, body.dormant);
     const data = await store.get(id, { type: "json" });
     if (!data) return new Response("Not found", { status: 404 });
     const k = (x) => String((x && x.name) || x || "").trim().toLowerCase();
@@ -283,6 +290,7 @@ export default async (req) => {
         await Promise.all(old.map((k) => bak.delete(k)));
       } catch (e) {}
     }
+    if (body.dormant) await saveDormant(id, body.dormant);
     if (prev && Array.isArray(prev.acctAdds)) body.acctAdds = prev.acctAdds;
     if (prev && prev.aliases && typeof prev.aliases === "object") body.aliases = { ...(body.aliases || {}), ...prev.aliases };
     body.log = [...(prev && Array.isArray(prev.log) ? prev.log : []), { at: body.savedAt || new Date().toISOString(), by: who.role, what: "Saved review with new files" }].slice(-300);
@@ -294,9 +302,23 @@ export default async (req) => {
   }
   if (req.method === "DELETE") {
     await store.delete(id);
+    try { await getStore("rep-dormant").delete(id); } catch (e) {}
     return json({ ok: true }, 200, who.role);
   }
   return new Response("Method not allowed", { status: 405 });
 };
+
+// Dormant list the Sales Hub reads (store "rep-dormant", one entry per rep id)
+async function saveDormant(id, d) {
+  try {
+    if (!d || typeof d !== "object") return;
+    const list = (Array.isArray(d.list) ? d.list : []).slice(0, 60).map((x) => ({
+      name: String((x && x.name) || "").slice(0, 160), code: String((x && x.code) || "").slice(0, 40), tier: String((x && x.tier) || "").slice(0, 2),
+      last: String((x && x.last) || "").slice(0, 7), sales12: Math.round(Number(x && x.sales12) || 0), sales: Math.round(Number(x && x.sales) || 0),
+    })).filter((x) => x.name);
+    await getStore("rep-dormant").setJSON(id, { v: 1, rep: String(d.rep || "").slice(0, 80), from: String(d.from || "").slice(0, 7), through: String(d.through || "").slice(0, 7),
+      count: Math.max(0, Math.round(Number(d.count) || 0)), value: Math.round(Number(d.value) || 0), list, at: new Date().toISOString() });
+  } catch (e) {}
+}
 
 export const config = { path: "/api/reps" };
