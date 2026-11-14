@@ -199,10 +199,13 @@ export default async (req) => {
     const log = await getStore("call-log-auto").get("latest", { type: "json" }).catch(() => null);
     if (!log || !Array.isArray(log.calls)) return json({ none: true }, 200, uiRole);
     const meta = { at: log.at, from: log.from, to: log.to, weekStart: log.weekStart, weekEnd: log.weekEnd, trigger: log.trigger };
-    if (!isRep) return json({ ...meta, calls: log.calls }, 200, uiRole);
+    const fu = log.followups && Array.isArray(log.followups.rows) ? log.followups : null;
+    if (!isRep) return json({ ...meta, calls: log.calls, followups: fu && { head: fu.head, rows: fu.rows } }, 200, uiRole);
     const d = await store.get(who.rep, { type: "json" }).catch(() => null);
-    if (!d) return json({ ...meta, calls: [] }, 200, uiRole);
-    return json({ ...meta, calls: callsUsableBy(d, log.calls) }, 200, uiRole);
+    if (!d) return json({ ...meta, calls: [], followups: fu && { head: fu.head, rows: [] } }, 200, uiRole);
+    const usable = customerTest(d), ci = fu ? fu.head.indexOf("Customer") : -1;
+    return json({ ...meta, calls: callsUsableBy(d, log.calls, usable),
+      followups: fu && { head: fu.head, rows: ci < 0 ? [] : fu.rows.filter((g) => usable(String(g[ci] || ""))) } }, 200, uiRole);
   }
 
   if (req.method === "GET" && !id) {
@@ -335,7 +338,7 @@ function repMatch(a, b) {
   const ed = (x, y) => { if (Math.abs(x.length - y.length) > 1) return 9; const d = Array.from({ length: x.length + 1 }, (_, i) => [i]); for (let j = 1; j <= y.length; j++) d[0][j] = j; for (let i = 1; i <= x.length; i++) for (let j = 1; j <= y.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1)); return d[x.length][y.length]; };
   return A[0][0] === B[0][0] && (A.at(-1) === B.at(-1) || (A.at(-1).length > 4 && ed(A.at(-1), B.at(-1)) <= 1));
 }
-function callsUsableBy(d, calls) {
+function customerTest(d) {
   const names = [];
   String((d.settings || {}).acctList || "").split(/\r?\n/).forEach((l) => { const n = l.split("\t")[0].trim(); if (n) names.push(n); });
   (Array.isArray(d.acctAdds) ? d.acctAdds : []).forEach((a) => { if (a && a.name) names.push(a.name); if (a && a.call) names.push(a.call); });
@@ -343,12 +346,15 @@ function callsUsableBy(d, calls) {
   const words = new Set(), keys = new Set(names.map(nkey));
   names.forEach((n) => toks(n).forEach((w) => words.add(w)));
   const al = d.aliases && typeof d.aliases === "object" ? d.aliases : {};
-  return calls.filter((c) => {
-    if (repMatch(c.rep, d.name)) return true;
-    if (keys.has(nkey(c.customer)) || al[c.customer] || al[callId(c)]) return true;
-    for (const w of toks(c.customer)) if (words.has(w)) return true;
+  const fn = (customer, id) => {
+    if (keys.has(nkey(customer)) || al[customer] || (id && al[id])) return true;
+    for (const w of toks(customer)) if (words.has(w)) return true;
     return false;
-  });
+  };
+  return fn;
+}
+function callsUsableBy(d, calls, usable = customerTest(d)) {
+  return calls.filter((c) => repMatch(c.rep, d.name) || usable(c.customer, callId(c)));
 }
 
 // Dormant list the Sales Hub reads (store "rep-dormant", one entry per rep id)
