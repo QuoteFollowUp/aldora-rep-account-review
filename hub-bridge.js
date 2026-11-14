@@ -7,14 +7,8 @@
       last two full months or the current partial month. */
 (function () {
   // 3. Open one account from the hub (Dormant accounts): #c=CODE&go=acct&rep=REP&a=CUSTOMER
-  //    Loads that rep's review (the territory the account is in), then opens the account sheet.
-  var readGo = function () {
-    try {
-      var p = new URLSearchParams((location.hash || "").replace(/^#/, ""));
-      return p.get("go") === "acct" && p.get("a") ? { rep: p.get("rep") || "", a: p.get("a") } : null;
-    } catch (e) { return null; }
-  };
-  var GO = readGo();
+  //    Kept here because the page strips the # part as it signs in. Handled further down.
+  window.__rarStartHash = location.hash || "";
   try {
     var h = location.hash || "";
     if (/(?:^#|&)ac=/.test(h)) history.replaceState(null, "", location.pathname + location.search + h.replace(/(^#|&)ac=/, "$1c="));
@@ -152,7 +146,15 @@
     }
   });
 
-  // ---- 3. Open one account (see top) ----
+  // ---- 3. Open one account (see top): loads that rep's review (the territory the account is in),
+  //      then opens the account sheet.
+  var readGo = function (hash) {
+    try {
+      var p = new URLSearchParams(String(hash == null ? location.hash : hash).replace(/^#/, ""));
+      return p.get("go") === "acct" && p.get("a") ? { rep: p.get("rep") || "", a: p.get("a") } : null;
+    } catch (e) { return null; }
+  };
+  var GO = readGo(window.__rarStartHash);
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
   var nameKey = function (s) { return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\b(inc|llc|co|corp|corporation|company|ltd|the)\b/g, " ").replace(/\s+/g, " ").trim(); };
   function sameRep(a, b) {
