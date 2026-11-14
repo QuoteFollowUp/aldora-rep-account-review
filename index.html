@@ -1091,7 +1091,11 @@ async function loadRep(id,d0){
         try{const r=callsForRep(AU.calls.map(c=>({...c,date:new Date(c.date)})),d.name);CALLS=r.calls.length?r.calls.map(c=>({...c})):null;$('#onlyCalled').checked=!!st.onlyCalled;
           const ds=(CALLS||[]).map(c=>c.date).sort((a,b)=>a-b);
           autoMsg=CALLS?`Call log sent automatically ${fmtStamp(AU.at)}: ${CALLS.length} calls, ${fmtDate(ds[0])} to ${fmtDate(ds.at(-1))}${r.fromOthers?` (${r.fromOthers} logged by another rep on an account on this list)`:''}.`:'';
-        }catch(e){CALLS=d.calls&&d.calls.length?d.calls.map(c=>({...c,date:new Date(c.date)})):null}}}
+        }catch(e){CALLS=d.calls&&d.calls.length?d.calls.map(c=>({...c,date:new Date(c.date)})):null}}
+      /* Logged quotes (follow-ups plus verbal quotes, every outcome) sent with it: read like an uploaded Logged Follow-Ups export */
+      if(AU&&AU.followups&&Array.isArray(AU.followups.rows)&&AU.followups.rows.length&&String(AU.at||'')>String(d.savedAt||'')&&typeof XLSX!=='undefined'){
+        try{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([AU.followups.head,...AU.followups.rows]),'Logged Follow-Ups');
+          const fu=parseFollowupsWb(wb);if(fu){fu.file='Logged quotes sent automatically '+fmtStamp(AU.at);QFU=fu;syncQuotes()}}catch(e){}}}
     if(CALLS){$('#stCalls').innerHTML=`<span class="pos">${esc(autoMsg||d.callsFile||`Loaded ${CALLS.length} calls.`)}</span>`;$('#dropCalls').classList.add('ok')}
     await refreshRepList();
     $('#saveInfo').innerHTML=`Showing ${esc(d.name)}, saved ${esc(fmtStamp(d.savedAt))}. To update, load the new files and click Save this rep.`;
