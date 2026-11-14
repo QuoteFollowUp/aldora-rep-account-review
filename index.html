@@ -1059,6 +1059,13 @@ function clearAll(){
   $('#out').hidden=true;$('#xlsx').disabled=true;$('#cooBtn').disabled=true;$('#print').disabled=true;$('#saveRep').disabled=true;
   refreshSales();refreshRepList();
 }
+/* The call log the Sales Hub sends every Friday at 5 PM. Read once per page load. */
+let AUTO_CALLS=null;
+function autoCallLog(){
+  if(STORE.mode!=='cloud')return Promise.resolve(null);
+  if(!AUTO_CALLS)AUTO_CALLS=fetch('/api/reps?auto=calls',{headers:{'x-access-code':STORE.code},cache:'no-store'}).then(r=>r.ok?r.json():null).then(j=>j&&!j.none?j:null).catch(()=>null);
+  return AUTO_CALLS;
+}
 async function loadRep(id,d0){
   if(!id){clearAll();return}
   $('#saveInfo').textContent='Loading…';
@@ -1077,7 +1084,15 @@ async function loadRep(id,d0){
     else if(d.aliases)putAliases({...getAliases(),...d.aliases});
     LOADED={id,stamp:d.changedAt||d.savedAt||''}; SYNC={savedAt:d.savedAt,changedAt:d.changedAt,changedBy:d.changedBy,log:Array.isArray(d.log)?d.log:[]};
     refreshSales(); $('#onlyCalled').checked=!!st.onlyCalled;
-    if(CALLS){$('#stCalls').innerHTML=`<span class="pos">${esc(d.callsFile||`Loaded ${CALLS.length} calls.`)}</span>`;$('#dropCalls').classList.add('ok')}
+    /* Friday 5 PM call log from the Sales Hub: newer than this rep's saved files, so use it (same matching as an uploaded export) */
+    let autoMsg='';
+    if(!d0){const AU=await autoCallLog();
+      if(AU&&Array.isArray(AU.calls)&&AU.calls.length&&String(AU.at||'')>String(d.savedAt||'')){
+        try{const r=callsForRep(AU.calls.map(c=>({...c,date:new Date(c.date)})),d.name);CALLS=r.calls.length?r.calls.map(c=>({...c})):null;$('#onlyCalled').checked=!!st.onlyCalled;
+          const ds=(CALLS||[]).map(c=>c.date).sort((a,b)=>a-b);
+          autoMsg=CALLS?`Call log sent automatically ${fmtStamp(AU.at)}: ${CALLS.length} calls, ${fmtDate(ds[0])} to ${fmtDate(ds.at(-1))}${r.fromOthers?` (${r.fromOthers} logged by another rep on an account on this list)`:''}.`:'';
+        }catch(e){CALLS=d.calls&&d.calls.length?d.calls.map(c=>({...c,date:new Date(c.date)})):null}}}
+    if(CALLS){$('#stCalls').innerHTML=`<span class="pos">${esc(autoMsg||d.callsFile||`Loaded ${CALLS.length} calls.`)}</span>`;$('#dropCalls').classList.add('ok')}
     await refreshRepList();
     $('#saveInfo').innerHTML=`Showing ${esc(d.name)}, saved ${esc(fmtStamp(d.savedAt))}. To update, load the new files and click Save this rep.`;
     if(SALES)$('#build').click();
