@@ -191,6 +191,20 @@ export default async (req) => {
   // The page only knows manager / viewer / rep. A branch manager browses like a viewer.
   const uiRole = who.role === "branch" ? "viewer" : who.role;
 
+  // The Call Log the Sales Hub sends every Friday at 5 PM (store "call-log-auto"). The page applies it
+  // to the open review with the same matching it uses for an uploaded Call Log export.
+  // A rep code gets only what that matching can use for their review: their own calls, plus other
+  // reps' calls on customers that share a word with an account on their list (or that they linked).
+  if (req.method === "GET" && new URL(req.url).searchParams.get("auto") === "calls") {
+    const log = await getStore("call-log-auto").get("latest", { type: "json" }).catch(() => null);
+    if (!log || !Array.isArray(log.calls)) return json({ none: true }, 200, uiRole);
+    const meta = { at: log.at, from: log.from, to: log.to, weekStart: log.weekStart, weekEnd: log.weekEnd, trigger: log.trigger };
+    if (!isRep) return json({ ...meta, calls: log.calls }, 200, uiRole);
+    const d = await store.get(who.rep, { type: "json" }).catch(() => null);
+    if (!d) return json({ ...meta, calls: [] }, 200, uiRole);
+    return json({ ...meta, calls: callsUsableBy(d, log.calls) }, 200, uiRole);
+  }
+
   if (req.method === "GET" && !id) {
     const { blobs } = await store.list();
     const keys = blobs.map((b) => b.key).filter((k) => !allowed || allowed.has(k));
@@ -307,6 +321,35 @@ export default async (req) => {
   }
   return new Response("Method not allowed", { status: 405 });
 };
+
+// ---- Auto call log, rep codes: keep the calls the page's callsForRep could use for this review ----
+// Same name rules as the page (repMatch, toks, nkey, callId). Errs on the side of sending a call.
+const STOPW = new Set(["inc", "llc", "co", "company", "corp", "corporation", "the", "of", "and", "dba", "glass", "mirror", "ltd", "formerly", "formely"]);
+const toks = (s) => new Set(String(s).toLowerCase().replace(/&/g, " and ").replace(/\(.*?\)/g, " ").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w && !STOPW.has(w)));
+const nkey = (s) => String(s).toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
+function callId(c) { const t = [String(c.date).slice(0, 10), c.customer, c.contact, String(c.notes || "").slice(0, 60)].join("|"); let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return "call:" + (h >>> 0).toString(36); }
+function repMatch(a, b) {
+  const t = (x) => { x = String(x || ""); if (x.includes(",")) x = x.split(",").reverse().join(" "); return x.toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(Boolean); };
+  const A = t(a), B = t(b); if (!A.length || !B.length) return false;
+  if (A.join(" ") === B.join(" ")) return true;
+  const ed = (x, y) => { if (Math.abs(x.length - y.length) > 1) return 9; const d = Array.from({ length: x.length + 1 }, (_, i) => [i]); for (let j = 1; j <= y.length; j++) d[0][j] = j; for (let i = 1; i <= x.length; i++) for (let j = 1; j <= y.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1)); return d[x.length][y.length]; };
+  return A[0][0] === B[0][0] && (A.at(-1) === B.at(-1) || (A.at(-1).length > 4 && ed(A.at(-1), B.at(-1)) <= 1));
+}
+function callsUsableBy(d, calls) {
+  const names = [];
+  String((d.settings || {}).acctList || "").split(/\r?\n/).forEach((l) => { const n = l.split("\t")[0].trim(); if (n) names.push(n); });
+  (Array.isArray(d.acctAdds) ? d.acctAdds : []).forEach((a) => { if (a && a.name) names.push(a.name); if (a && a.call) names.push(a.call); });
+  (Array.isArray(d.sfiles) ? d.sfiles : []).forEach((f) => (Array.isArray(f.rows) ? f.rows : []).forEach((r) => r && r.name && names.push(r.name)));
+  const words = new Set(), keys = new Set(names.map(nkey));
+  names.forEach((n) => toks(n).forEach((w) => words.add(w)));
+  const al = d.aliases && typeof d.aliases === "object" ? d.aliases : {};
+  return calls.filter((c) => {
+    if (repMatch(c.rep, d.name)) return true;
+    if (keys.has(nkey(c.customer)) || al[c.customer] || al[callId(c)]) return true;
+    for (const w of toks(c.customer)) if (words.has(w)) return true;
+    return false;
+  });
+}
 
 // Dormant list the Sales Hub reads (store "rep-dormant", one entry per rep id)
 async function saveDormant(id, d) {
