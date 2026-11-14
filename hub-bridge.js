@@ -6,6 +6,15 @@
       Rule (same as the Revenue Report's "dropped"): bought in 2+ earlier months, no invoice in the
       last two full months or the current partial month. */
 (function () {
+  // 3. Open one account from the hub (Dormant accounts): #c=CODE&go=acct&rep=REP&a=CUSTOMER
+  //    Loads that rep's review (the territory the account is in), then opens the account sheet.
+  var readGo = function () {
+    try {
+      var p = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+      return p.get("go") === "acct" && p.get("a") ? { rep: p.get("rep") || "", a: p.get("a") } : null;
+    } catch (e) { return null; }
+  };
+  var GO = readGo();
   try {
     var h = location.hash || "";
     if (/(?:^#|&)ac=/.test(h)) history.replaceState(null, "", location.pathname + location.search + h.replace(/(^#|&)ac=/, "$1c="));
@@ -141,5 +150,54 @@
       window.confirm = confOrig;
       busy = false;
     }
+  });
+
+  // ---- 3. Open one account (see top) ----
+  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  var nameKey = function (s) { return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\b(inc|llc|co|corp|corporation|company|ltd|the)\b/g, " ").replace(/\s+/g, " ").trim(); };
+  function sameRep(a, b) {
+    var t = function (x) { x = String(x || ""); if (x.indexOf(",") >= 0) x = x.split(",").reverse().join(" "); return x.toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(Boolean); };
+    var A = t(a), B = t(b);
+    if (!A.length || !B.length) return false;
+    if (A.join(" ") === B.join(" ")) return true;
+    return A[0][0] === B[0][0] && A[A.length - 1] === B[B.length - 1];
+  }
+  var opening = false;
+  async function openAccount(go) {
+    if (!go || opening) return;
+    opening = true;
+    try {
+      // Wait for sign-in and the first load to settle
+      for (var i = 0; i < 120; i++) { var S = g("STORE"); if (S && S.mode && (S.mode !== "cloud" || S.role)) break; await sleep(250); }
+      var S2 = g("STORE");
+      if (!S2) return;
+      await sleep(400);
+      var items = [];
+      try { items = await S2.list(); } catch (e) {}
+      var it = items.find(function (x) { return sameRep(x.name, go.rep); }) || (items.length === 1 ? items[0] : null);
+      if (it && g("CURRENT_ID") !== it.id) {
+        var sel = document.querySelector("#repSel"); if (sel) sel.value = it.id;
+        await g("loadRep")(it.id);
+      }
+      // Wait for the review to build, then open the account
+      for (var j = 0; j < 80; j++) { var M = g("MODEL"); if (M && Array.isArray(M.accounts) && M.accounts.length) break; await sleep(250); }
+      var M2 = g("MODEL");
+      if (!M2 || !Array.isArray(M2.accounts)) return;
+      var k = nameKey(go.a);
+      var a = M2.accounts.find(function (x) { return x.name === go.a; }) || M2.accounts.find(function (x) { return nameKey(x.name) === k; });
+      if (a) { g("openAcct")(a.name); return; }
+      // Not in this review: search for it so the rep sees the closest names
+      var fi = document.querySelector("#findIn");
+      if (fi) { fi.value = go.a; fi.dispatchEvent(new Event("input", { bubbles: true })); fi.focus(); }
+    } catch (e) {
+    } finally { opening = false; }
+  }
+  if (GO) openAccount(GO);
+  // The hub reuses the open frame and changes only the # part on later clicks
+  window.addEventListener("hashchange", function () {
+    var go = readGo();
+    if (!go) return;
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    openAccount(go);
   });
 })();
