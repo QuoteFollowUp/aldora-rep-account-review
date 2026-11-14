@@ -191,6 +191,20 @@ export default async (req) => {
   // The page only knows manager / viewer / rep. A branch manager browses like a viewer.
   const uiRole = who.role === "branch" ? "viewer" : who.role;
 
+  // The Call Log the Sales Hub sends every Friday at 5 PM (store "call-log-auto"). The page applies it
+  // to the open review with the same matching it uses for an uploaded Call Log export.
+  // A rep code gets only what that matching can use for their review: their own calls, plus other
+  // reps' calls on customers that share a word with an account on their list (or that they linked).
+  if (req.method === "GET" && new URL(req.url).searchParams.get("auto") === "calls") {
+    const log = await getStore("call-log-auto").get("latest", { type: "json" }).catch(() => null);
+    if (!log || !Array.isArray(log.calls)) return json({ none: true }, 200, uiRole);
+    const meta = { at: log.at, from: log.from, to: log.to, weekStart: log.weekStart, weekEnd: log.weekEnd, trigger: log.trigger };
+    if (!isRep) return json({ ...meta, calls: log.calls }, 200, uiRole);
+    const d = await store.get(who.rep, { type: "json" }).catch(() => null);
+    if (!d) return json({ ...meta, calls: [] }, 200, uiRole);
+    return json({ ...meta, calls: callsUsableBy(d, log.calls) }, 200, uiRole);
+  }
+
   if (req.method === "GET" && !id) {
     const { blobs } = await store.list();
     const keys = blobs.map((b) => b.key).filter((k) => !allowed || allowed.has(k));
@@ -207,20 +221,6 @@ export default async (req) => {
       res.headers.set("x-missing-reps", [...coded].filter((k) => !have.has(k)).join(","));
     }
     return res;
-  }
-
-  // The Call Log the Sales Hub sends every Friday at 5 PM (store "call-log-auto"). The page applies it
-  // to the open review with the same matching it uses for an uploaded Call Log export.
-  // A rep code gets only what that matching can use for their review: their own calls, plus other
-  // reps' calls on customers that share a word with an account on their list (or that they linked).
-  if (req.method === "GET" && new URL(req.url).searchParams.get("auto") === "calls") {
-    const log = await getStore("call-log-auto").get("latest", { type: "json" }).catch(() => null);
-    if (!log || !Array.isArray(log.calls)) return json({ none: true }, 200, uiRole);
-    const meta = { at: log.at, from: log.from, to: log.to, weekStart: log.weekStart, weekEnd: log.weekEnd, trigger: log.trigger };
-    if (!isRep) return json({ ...meta, calls: log.calls }, 200, uiRole);
-    const d = await store.get(who.rep, { type: "json" }).catch(() => null);
-    if (!d) return json({ ...meta, calls: [] }, 200, uiRole);
-    return json({ ...meta, calls: callsUsableBy(d, log.calls) }, 200, uiRole);
   }
 
   if (!id || !/^[a-z0-9-]{1,80}$/.test(id)) return new Response("Bad id", { status: 400 });
