@@ -306,6 +306,7 @@
       var d = await (await fetch(HUB + "/api/account-flags", { headers: { "x-hub-code": c } })).json();
       state.pend = {}; state.gone = {};
       (d.flags || []).forEach(function (f) {
+        if (f.kind === "add") return; // new-account requests are not "not mine" flags
         var k = repKey(f.rep) + "|" + key(f.account);
         if (f.status === "removed") state.gone[k] = f; else if (f.status === "pending") state.pend[k] = f;
       });
