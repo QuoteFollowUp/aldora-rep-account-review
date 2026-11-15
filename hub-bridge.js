@@ -362,7 +362,7 @@
       '<select id="flag-why" style="width:100%;padding:8px;border:1px solid #D9E2E3;border-radius:8px;font:inherit"></select>' +
       '<label style="display:block;margin:14px 0 6px;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:#5E6E78">Note (optional)</label>' +
       '<textarea id="flag-note" rows="3" maxlength="300" placeholder="Who you think it belongs to, or anything Fred should know" style="width:100%;padding:8px;border:1px solid #D9E2E3;border-radius:8px;font:inherit;box-sizing:border-box"></textarea>' +
-      '<p style="color:#5E6E78;font-size:.85rem;margin:12px 0 0">It shows red until Fred confirms. Once he does, it comes off your list here, in My Territory and on Hub Home.</p>' +
+      '<p style="color:#5E6E78;font-size:.85rem;margin:12px 0 0">Fred will check with Niall and your branch manager, and approve once confirmed. Until then it shows red. Once approved, it comes off your list in every app.</p>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px"><button value="cancel" style="padding:8px 14px;border-radius:8px;border:1px solid #115E67;background:#fff;color:#115E67;font-weight:600;cursor:pointer">Cancel</button>' +
       '<button value="ok" style="padding:8px 14px;border-radius:8px;border:1px solid #A33A3A;background:#A33A3A;color:#fff;font-weight:600;cursor:pointer">Send flag</button></div></form>';
     document.body.appendChild(d);
