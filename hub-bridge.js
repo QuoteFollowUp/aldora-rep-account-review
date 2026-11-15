@@ -203,3 +203,80 @@
     openAccount(go);
   });
 })();
+
+/* 4. Trip -> My Territory route (Nov 15 2026).
+   When My Territory is open for this code (/api/territory-status on the Sales Hub), the trip panel gets a
+   "Map this trip" button, and adding an account to a trip shows a short prompt to build the route.
+   The trip's account names go to My Territory in the address (#trip=), where they are matched to the
+   rep's mapped accounts and routed: grouped into days, ordered to cut driving. */
+(function () {
+  var HUB = "https://aldora-sales-hub.netlify.app";
+  var g = function (expr) { try { return (0, eval)(expr); } catch (e) { return undefined; } };
+  var open = null, asked = "", toastT = null;
+
+  function code() { var S = g('typeof STORE !== "undefined" ? STORE : null'); return S && S.code ? S.code : ""; }
+  function trip() {
+    var M = g('typeof MODEL !== "undefined" ? MODEL : null'), T = g('typeof TRIP !== "undefined" ? TRIP : null');
+    if (!M || !T || !M.accounts) return null;
+    var names = M.accounts.filter(function (a) { return T.has(a.name); }).map(function (a) { return a.name; });
+    var rn = document.querySelector("#repName");
+    return { rep: M.rep || (rn ? rn.value.trim() : ""), names: names };
+  }
+  function url() {
+    var t = trip(); if (!t || !t.names.length) return "";
+    return HUB + "/territory/#ac=" + encodeURIComponent(code()) + "&rep=" + encodeURIComponent(t.rep) +
+      "&trip=" + encodeURIComponent(t.names.join("|"));
+  }
+  async function check() {
+    var c = code();
+    if (!c || c === asked) return;
+    asked = c;
+    try {
+      var r = await fetch(HUB + "/api/territory-status", { headers: { "x-hub-code": c } });
+      var d = await r.json(); open = !!d.open;
+    } catch (e) { open = false; }
+    addButton();
+  }
+  function css() {
+    if (document.getElementById("terr-css")) return;
+    var s = document.createElement("style"); s.id = "terr-css";
+    s.textContent = ".terr-map{display:inline-flex;align-items:center;gap:6px}" +
+      ".terr-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9999;display:flex;gap:12px;align-items:center;" +
+      "background:#243947;color:#fff;border-radius:12px;padding:12px 16px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:15px;max-width:calc(100vw - 24px)}" +
+      ".terr-toast a{background:#6A9E39;color:#fff;border-radius:8px;padding:8px 12px;font-weight:700;text-decoration:none;white-space:nowrap}" +
+      ".terr-toast button{background:none;border:0;color:#cfd8dc;font-size:20px;cursor:pointer;line-height:1}" +
+      "@media print{.terr-map,.terr-toast{display:none!important}}";
+    document.head.appendChild(s);
+  }
+  function addButton() {
+    if (!open) return;
+    var row = document.querySelector('[data-panel=trip] .tripbar .row');
+    if (!row || row.querySelector(".terr-map")) return;
+    css();
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "primary terr-map";
+    b.innerHTML = "Map this trip &#8599;";
+    b.title = "Open these accounts in My Territory and build the driving route";
+    b.onclick = function () { var u = url(); if (u) window.open(u, "_blank", "noopener"); };
+    row.insertBefore(b, row.firstChild);
+  }
+  function toast(n) {
+    if (!open) return;
+    css();
+    var t = document.querySelector(".terr-toast");
+    if (!t) { t = document.createElement("div"); t.className = "terr-toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
+    t.innerHTML = "<span>" + n + " account" + (n > 1 ? "s" : "") + " on this trip. Build the route?</span>" +
+      '<a href="#" id="terr-go">Map this trip &#8599;</a><button type="button" aria-label="Close">&times;</button>';
+    t.querySelector("#terr-go").onclick = function (e) { e.preventDefault(); var u = url(); if (u) window.open(u, "_blank", "noopener"); t.remove(); };
+    t.querySelector("button").onclick = function () { t.remove(); };
+    clearTimeout(toastT); toastT = setTimeout(function () { if (t.parentNode) t.remove(); }, 7000);
+  }
+  document.addEventListener("change", function (e) {
+    var el = e.target;
+    if (!el || !el.matches || !el.matches("[data-trip]") || !el.checked) return;
+    setTimeout(function () { var t = trip(); if (t && t.names.length) toast(t.names.length); }, 0);
+  });
+  // the trip panel is redrawn on every change: put the button back right away
+  new MutationObserver(function () { if (open) addButton(); }).observe(document.documentElement, { childList: true, subtree: true });
+  setInterval(check, 1500);
+})();
