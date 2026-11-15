@@ -280,3 +280,111 @@
   new MutationObserver(function () { if (open) addButton(); }).observe(document.documentElement, { childList: true, subtree: true });
   setInterval(check, 1500);
 })();
+
+/* 5. "Not my account" flags (Nov 15 2026), shared with the Sales Hub (/api/account-flags).
+   Pending flags show red here and in My Territory until Fred decides. When Fred confirms a removal, the
+   account is hidden from this review (cards, tables, trip) for that rep. Each account card gets a
+   "Not my account" button. Shown only when My Territory is open for the signed-in code. */
+(function () {
+  var HUB = "https://aldora-sales-hub.netlify.app";
+  var g = function (expr) { try { return (0, eval)(expr); } catch (e) { return undefined; } };
+  var key = function (s) { return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(inc|llc|co|corp|corporation|company|ltd|the)\b/g, " ").replace(/\s+/g, " ").trim(); };
+  var state = { open: false, code: "", pend: {}, gone: {}, at: 0 };
+
+  function code() { var S = g('typeof STORE !== "undefined" ? STORE : null'); return S && S.code ? S.code : ""; }
+  function rep() { var M = g('typeof MODEL !== "undefined" ? MODEL : null'); var rn = document.querySelector("#repName"); return (M && M.rep) || (rn ? rn.value.trim() : ""); }
+  function repKey(r) { return String(r || "").toLowerCase().replace(/[^a-z]+/g, ""); }
+  async function refresh(force) {
+    var c = code(); if (!c) return;
+    if (!force && c === state.code && Date.now() - state.at < 60000) return;
+    state.code = c; state.at = Date.now();
+    try {
+      var s = await (await fetch(HUB + "/api/territory-status", { headers: { "x-hub-code": c } })).json();
+      state.open = !!s.open;
+      if (!state.open) { paint(); return; }
+      var d = await (await fetch(HUB + "/api/account-flags", { headers: { "x-hub-code": c } })).json();
+      state.pend = {}; state.gone = {};
+      (d.flags || []).forEach(function (f) {
+        var k = repKey(f.rep) + "|" + key(f.account);
+        if (f.status === "removed") state.gone[k] = f; else if (f.status === "pending") state.pend[k] = f;
+      });
+    } catch (e) {}
+    paint();
+  }
+  function css() {
+    if (document.getElementById("flag-css")) return;
+    var s = document.createElement("style"); s.id = "flag-css";
+    s.textContent = ".acct.flag-pend{outline:3px solid #D32F2F;outline-offset:-3px;background:#FFF5F5}" +
+      "tr.flag-pend td{background:#FFF0F0}" +
+      ".flag-tag{display:inline-block;background:#FBE3E3;color:#A33A3A;font-weight:700;font-size:.75rem;padding:2px 8px;border-radius:99px;margin-left:6px;white-space:nowrap}" +
+      ".flag-btn{border:1px solid #A33A3A;color:#A33A3A;background:#fff;border-radius:6px;padding:2px 8px;font-size:.78rem;font-weight:600;cursor:pointer;margin-left:6px}" +
+      ".flag-hide{display:none!important}@media print{.flag-btn{display:none!important}}";
+    document.head.appendChild(s);
+  }
+  function paint() {
+    var r = repKey(rep()), T = g('typeof TRIP !== "undefined" ? TRIP : null'), tripChanged = false;
+    if (!state.open || !r) return;
+    css();
+    document.querySelectorAll("[data-trip]").forEach(function (i) {
+      var name = i.dataset.trip, k = r + "|" + key(name), card = i.closest(".acct");
+      if (!card) return;
+      var gone = !!state.gone[k], pend = !!state.pend[k];
+      card.classList.toggle("flag-hide", gone);
+      card.classList.toggle("flag-pend", pend);
+      if (gone && T && T.has(name)) { T.delete(name); tripChanged = true; }
+      var top = card.querySelector(".top");
+      if (!top) return;
+      var tag = top.querySelector(".flag-tag"), btn = top.querySelector(".flag-btn");
+      if (pend && !tag) { tag = document.createElement("span"); tag.className = "flag-tag"; tag.textContent = "Flagged: waiting for Fred"; top.appendChild(tag); }
+      if (!pend && tag) tag.remove();
+      if (!pend && !gone && !btn) {
+        btn = document.createElement("button"); btn.type = "button"; btn.className = "flag-btn"; btn.textContent = "Not my account";
+        btn.onclick = function () { flag(name); }; top.appendChild(btn);
+      }
+      if (pend && btn) btn.remove();
+    });
+    document.querySelectorAll("[data-pc]").forEach(function (i) {
+      var k = r + "|" + key(i.dataset.pc), tr = i.closest("tr"); if (!tr) return;
+      tr.classList.toggle("flag-hide", !!state.gone[k]);
+      tr.classList.toggle("flag-pend", !!state.pend[k]);
+    });
+    if (tripChanged) { try { g("saveTrip()"); g("syncTrip()"); } catch (e) {} }
+  }
+  function dialog() {
+    var d = document.getElementById("flag-dlg");
+    if (d) return d;
+    d = document.createElement("dialog"); d.id = "flag-dlg";
+    d.style.cssText = "border:0;border-radius:14px;padding:20px 22px;max-width:440px;width:calc(100vw - 32px);box-shadow:0 12px 40px rgba(0,0,0,.3);font:15px/1.4 system-ui,sans-serif;color:#243947";
+    d.innerHTML = '<form method="dialog"><h2 style="margin:0 0 4px;font-size:1.2rem">Not my account</h2><div id="flag-what" style="color:#5E6E78;font-size:.9rem"></div>' +
+      '<label style="display:block;margin:14px 0 6px;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:#5E6E78">Why</label>' +
+      '<select id="flag-why" style="width:100%;padding:8px;border:1px solid #D9E2E3;border-radius:8px;font:inherit"></select>' +
+      '<label style="display:block;margin:14px 0 6px;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:#5E6E78">Note (optional)</label>' +
+      '<textarea id="flag-note" rows="3" maxlength="300" placeholder="Who you think it belongs to, or anything Fred should know" style="width:100%;padding:8px;border:1px solid #D9E2E3;border-radius:8px;font:inherit;box-sizing:border-box"></textarea>' +
+      '<p style="color:#5E6E78;font-size:.85rem;margin:12px 0 0">It shows red until Fred confirms. Once he does, it comes off your list here, in My Territory and on Hub Home.</p>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px"><button value="cancel" style="padding:8px 14px;border-radius:8px;border:1px solid #115E67;background:#fff;color:#115E67;font-weight:600;cursor:pointer">Cancel</button>' +
+      '<button value="ok" style="padding:8px 14px;border-radius:8px;border:1px solid #A33A3A;background:#A33A3A;color:#fff;font-weight:600;cursor:pointer">Send flag</button></div></form>';
+    document.body.appendChild(d);
+    d.querySelector("#flag-why").innerHTML = ["Not my territory", "Belongs to another rep", "Out of business", "Not a customer", "Other"].map(function (x) { return "<option>" + x + "</option>"; }).join("");
+    return d;
+  }
+  function flag(name) {
+    var d = dialog();
+    d.querySelector("#flag-what").textContent = name + " · on " + rep() + "'s list";
+    d.querySelector("#flag-note").value = "";
+    d.onclose = async function () {
+      if (d.returnValue !== "ok") return;
+      try {
+        var r = await fetch(HUB + "/api/account-flags", { method: "POST", headers: { "x-hub-code": code(), "content-type": "application/json" },
+          body: JSON.stringify({ action: "flag", rep: rep(), account: name, reason: d.querySelector("#flag-why").value, note: d.querySelector("#flag-note").value }) });
+        var j = await r.json();
+        if (!r.ok) throw new Error(j.error || r.status);
+        await refresh(true);
+      } catch (e) { alert("Could not send the flag (" + (e.message || e) + "). Try again or tell Fred."); }
+    };
+    d.showModal();
+  }
+  var t = null;
+  new MutationObserver(function () { if (!state.open) return; clearTimeout(t); t = setTimeout(paint, 150); }).observe(document.documentElement, { childList: true, subtree: true });
+  setInterval(function () { refresh(false); }, 3000);
+})();
