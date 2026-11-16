@@ -389,3 +389,103 @@
   new MutationObserver(function () { if (!state.open) return; clearTimeout(t); t = setTimeout(paint, 150); }).observe(document.documentElement, { childList: true, subtree: true });
   setInterval(function () { refresh(false); }, 3000);
 })();
+
+/* 6. Print this rep's account list and compare it with My Territory.
+   Adds a "Print / compare list" button beside "Download this rep's list". It prints the rep's list as this app
+   has it (assigned list plus accounts added here, minus removals Fred confirmed) in the same layout as the
+   Account list tab in My Territory, and lines it up against My Territory's list: on both, only here, only there. */
+(function () {
+  var HUB = "https://aldora-sales-hub.netlify.app";
+  var g = function (expr) { try { return (0, eval)(expr); } catch (e) { return undefined; } };
+  var key = function (s) { return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(inc|llc|co|corp|corporation|company|ltd|the|dba)\b/g, " ").replace(/\s+/g, ""); };
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  var money = function (n) { return n ? "$" + Math.round(n).toLocaleString() : ""; };
+
+  async function rarList() {
+    var S = g('typeof STORE !== "undefined" ? STORE : null'), id = g('typeof CURRENT_ID !== "undefined" ? CURRENT_ID : ""');
+    var M = g('typeof MODEL !== "undefined" ? MODEL : null'), rn = document.querySelector("#repName");
+    var d = S && id ? await S.get(id) : null;
+    var rep = (d && d.name) || (M && M.rep) || (rn ? rn.value.trim() : "");
+    var set = (d && d.settings) || {}, listText = String(set.acctList || (document.querySelector("#acctList") || {}).value || "");
+    var ytd = {}; ((M && M.accounts) || []).forEach(function (a) { ytd[key(a.name)] = a.ytd || 0; });
+    var rows = [], seen = {};
+    listText.split(/\r?\n/).forEach(function (l) { var x = l.split("\t"), n = (x[0] || "").trim(); if (!n || seen[key(n)]) return; seen[key(n)] = 1; rows.push({ a: n, code: (x[1] || "").trim(), src: "Assigned list" }); });
+    ((d && d.acctAdds) || []).forEach(function (a) { if (!a || !a.name || seen[key(a.name)]) return; seen[key(a.name)] = 1; rows.push({ a: a.name, code: a.code || "", src: "Added in Rep Account Review" }); });
+    rows.forEach(function (r) { r.ytd = ytd[key(r.a)] || 0; });
+    return { rep: rep, rows: rows };
+  }
+  async function territoryList(rep) {
+    var S = g('typeof STORE !== "undefined" ? STORE : null'), c = S && S.code;
+    if (!c) return { error: "No access code" };
+    try {
+      var r = await fetch(HUB + "/api/territory?rep=" + encodeURIComponent(rep), { headers: { "x-hub-code": c } });
+      var j = await r.json();
+      if (!r.ok || !j.plan) return { error: j.error === "locked" ? "My Territory is not open for this code yet" : j.error === "hidden" ? "My Territory is not open for this team yet" : "Could not read My Territory (" + (j.error || r.status) + ")" };
+      var p = j.plan, out = [];
+      (p.accounts || []).forEach(function (a) { out.push({ a: a[0], city: [a[2], a[3]].filter(Boolean).join(", "), ytd: a[7] || 0 }); });
+      ["outside", "phone", "unmapped"].forEach(function (k) { (p[k] || []).forEach(function (x) { out.push({ a: x.a, city: [x.city, x.st].filter(Boolean).join(", "), ytd: x.ytd || 0 }); }); });
+      if (j.plan.rep && j.plan.rep.replace(/[^a-z]/gi, "").toLowerCase().replace(/(.)\1+/g, "$1") !== rep.replace(/[^a-z]/gi, "").toLowerCase().replace(/(.)\1+/g, "$1"))
+        return { error: "My Territory has no list for " + rep };
+      return { rep: p.rep, rows: out };
+    } catch (e) { return { error: "Could not reach My Territory" }; }
+  }
+  async function run(btn) {
+    var w = window.open("", "_blank");
+    if (!w) { alert("Allow pop-ups for this site to print the list."); return; }
+    w.document.write("<p style='font:16px sans-serif;padding:24px'>Building the list\u2026</p>");
+    btn.disabled = true;
+    try {
+      var R = await rarList();
+      if (!R.rep || !R.rows.length) { w.document.body.innerHTML = "<p style='font:16px sans-serif;padding:24px'>Open a saved rep with an account list first.</p>"; return; }
+      var T = await territoryList(R.rep);
+      var tk = {}, rk = {};
+      (T.rows || []).forEach(function (x) { tk[key(x.a)] = x; });
+      R.rows.forEach(function (x) { rk[key(x.a)] = x; x.inT = !!tk[key(x.a)]; if (x.inT && !x.ytd) x.ytd = tk[key(x.a)].ytd; });
+      var onlyR = R.rows.filter(function (x) { return !x.inT; }), onlyT = (T.rows || []).filter(function (x) { return !rk[key(x.a)]; });
+      var both = R.rows.length - onlyR.length;
+      R.rows.sort(function (a, b) { return (b.ytd - a.ytd) || a.a.localeCompare(b.a); });
+      var today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      var tbl = function (head, rows) { return "<table><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody></table>"; };
+      var cmp = T.error ? "<div class='warn'>" + esc(T.error) + ". The list below is Rep Account Review only.</div>" :
+        "<div class='kpis'><div><b>" + R.rows.length + "</b>in Rep Account Review</div><div><b>" + T.rows.length + "</b>in My Territory</div><div class='ok'><b>" + both + "</b>on both</div>" +
+        "<div class='" + (onlyR.length ? "bad" : "ok") + "'><b>" + onlyR.length + "</b>only in Rep Account Review</div><div class='" + (onlyT.length ? "bad" : "ok") + "'><b>" + onlyT.length + "</b>only in My Territory</div></div>" +
+        (onlyR.length || onlyT.length ? "<h2>Lists that do not match</h2>" +
+          (onlyR.length ? "<h3>Only in Rep Account Review (" + onlyR.length + ")</h3>" + tbl(["Account", "Cust #", "Source", "Sales this year"], onlyR.map(function (x) { return "<tr><td><b>" + esc(x.a) + "</b></td><td>" + esc(x.code) + "</td><td>" + esc(x.src) + "</td><td class=n>" + money(x.ytd) + "</td></tr>"; })) : "") +
+          (onlyT.length ? "<h3>Only in My Territory (" + onlyT.length + ")</h3>" + tbl(["Account", "City", "Sales this year"], onlyT.map(function (x) { return "<tr><td><b>" + esc(x.a) + "</b></td><td>" + esc(x.city) + "</td><td class=n>" + money(x.ytd) + "</td></tr>"; })) : "") +
+          "<p class='note'>Names are matched ignoring punctuation, spacing and Inc, LLC or Co. A spelling difference shows up here as a mismatch on both sides.</p>"
+          : "<p class='good'>Both lists match.</p>");
+      var html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>" + esc(R.rep) + " account list " + today + "</title><style>" +
+        "@page{size:letter landscape;margin:.5in}body{font:10pt/1.4 'IBM Plex Sans',Arial,sans-serif;color:#243947;margin:0;padding:24px}" +
+        ".top{display:flex;justify-content:space-between;align-items:flex-end;border-top:6px solid #115E67;padding-top:14px;margin-bottom:14px}.top img{height:40px}" +
+        "h1{font:800 18pt Archivo,Arial,sans-serif;color:#0B434A;margin:0;text-align:right}.sub{color:#5E6E78;font-size:9pt;text-align:right}" +
+        "h2{font:800 13pt Archivo,Arial,sans-serif;color:#0B434A;margin:18px 0 6px}h3{font:700 11pt Arial,sans-serif;color:#A33A3A;margin:12px 0 4px}" +
+        ".kpis{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}.kpis div{border:1px solid #D9E2E3;border-radius:6px;padding:8px 12px;min-width:120px;font-size:9pt;color:#5E6E78}.kpis b{display:block;font-size:16pt;color:#0B434A}" +
+        ".kpis .ok{border-left:4px solid #6A9E39}.kpis .bad{border-left:4px solid #A33A3A}.good{color:#4E7A2B;font-weight:700}" +
+        ".warn{background:#FFF4E5;border-left:4px solid #E0A33A;padding:8px 12px;margin:8px 0}.note{color:#5E6E78;font-size:8.5pt}" +
+        "table{width:100%;border-collapse:collapse;font-size:9pt;margin-bottom:6px}th{background:#115E67;color:#fff;text-align:left;padding:5px 8px}td{padding:4px 8px;border-bottom:1px solid #D9E2E3}" +
+        "tbody tr:nth-child(even) td{background:#F4F8F8}td.n,th.n{text-align:right}tr{break-inside:avoid}thead{display:table-header-group}" +
+        ".x{color:#A33A3A;font-weight:700}.y{color:#4E7A2B}.bar{margin-bottom:12px}.bar button{font:600 11pt Arial;padding:8px 16px;border-radius:6px;border:1px solid #115E67;background:#115E67;color:#fff;cursor:pointer}@media print{.bar{display:none}}" +
+        "</style></head><body><div class='bar'><button onclick='window.print()'>Print or save as PDF</button></div>" +
+        "<div class='top'><img src='" + HUB + "/aldora-logo.png' alt='Aldora'><div><h1>" + esc(R.rep) + " \u00B7 Account list</h1><div class='sub'>From Rep Account Review \u00B7 compared with My Territory \u00B7 " + today + "</div></div></div>" +
+        cmp + "<h2>Rep Account Review list (" + R.rows.length + ")</h2>" +
+        tbl(["#", "Account", "Cust #", "Source", "Sales this year", "In My Territory"], R.rows.map(function (x, i) {
+          return "<tr><td class=note>" + (i + 1) + "</td><td><b>" + esc(x.a) + "</b></td><td>" + esc(x.code) + "</td><td class=note>" + esc(x.src) + "</td><td class=n>" + money(x.ytd) + "</td><td>" +
+            (T.error ? "" : x.inT ? "<span class=y>Yes</span>" : "<span class=x>No</span>") + "</td></tr>"; })) +
+        "<p class='note'>Aldora Sales Hub \u00B7 Rep Account Review. Sales this year come from the sales file loaded in Rep Account Review, or from My Territory when it is not loaded.</p></body></html>";
+      w.document.open(); w.document.write(html); w.document.close();
+      setTimeout(function () { try { w.focus(); w.print(); } catch (e) {} }, 700);
+    } finally { btn.disabled = false; }
+  }
+  function add() {
+    if (document.getElementById("printList")) return;
+    var one = document.getElementById("dlOne"); if (!one) return;
+    var b = document.createElement("button"); b.type = "button"; b.id = "printList"; b.textContent = "Print / compare list";
+    b.title = "Print this rep's list and check it against My Territory";
+    b.onclick = function () { run(b); };
+    one.insertAdjacentElement("afterend", b);
+    var sync = function () { b.disabled = !g('typeof CURRENT_ID !== "undefined" ? CURRENT_ID : ""') && !(document.querySelector("#acctList") || {}).value; };
+    sync(); setInterval(sync, 1500);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", add); else add();
+})();
