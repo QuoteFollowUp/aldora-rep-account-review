@@ -310,6 +310,8 @@
         var k = repKey(f.rep) + "|" + key(f.account);
         if (f.status === "removed") state.gone[k] = f; else if (f.status === "pending") state.pend[k] = f;
       });
+      // every confirmed removal, including ones the rep did not ask for (the hub lists them without details)
+      (d.gone || []).forEach(function (g) { var k = repKey(g.rep) + "|" + key(g.account); if (!state.gone[k]) state.gone[k] = { rep: g.rep, account: g.account, status: "removed" }; });
     } catch (e) {}
     paint();
   }
