@@ -699,7 +699,7 @@ body.rep-view .sync-line,body.rep-view .sync-log{display:none!important}
         <button id="switchCode" type="button">Use a different code</button>
       </div>
       <span class="status muted" id="saveInfo"></span>
-      <span class="muted" style="font-size:.72rem;letter-spacing:.06em"><span data-appver>Version 2026-11-12a</span></span>
+      <span class="muted" style="font-size:.72rem;letter-spacing:.06em"><span data-appver>Version 2026-11-18a</span></span>
       <form id="codeForm" class="codeform" hidden autocomplete="off">
         <label for="codeIn" class="kicker">Access code</label>
         <input id="codeIn" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Enter your code">
@@ -880,6 +880,7 @@ function parseSalesGrid(grid){
     if(!monthCols.some(([j])=>isNum(r[j])||r[j]===''||r[j]==null))continue;
     // Skip only exact repeats (same customer, facility and monthly numbers listed again under another rep).
     if(repCol>=0){const k=nkey(name)+'|'+(facCol>=0?String(r[facCol]??'').trim():''),sig=monthCols.map(([j])=>r[j]??'').join(',');const seen=seenRep.get(k)||[];if(seen.includes(sig))continue;seen.push(sig);seenRep.set(k,seen)}
+    if(facCol>=0&&!facOk(name,r[facCol]))continue;
     const m={}; months.forEach(k=>m[k]=0);
     monthCols.forEach(([j,k])=>m[k]+=parseMoney(r[j]));
     rows.push({name,city:cityCol>=0?String(r[cityCol]??'').trim():'',div:divCol>=0?normDiv(r[divCol]):'',code:codeCol>=0?String(r[codeCol]??'').trim():'',route:routeCol>=0?String(r[routeCol]??'').trim():'',m});
@@ -939,6 +940,14 @@ function parseAnyGrid(grid){
 }
 const fmtD=d=>d?`${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`:'?';
 const nkey=s=>String(s).toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]/g,'');
+/* Accounts tied to one facility. Another company with the same name at a different facility stays off this rep's review. */
+const FAC_RULES=[{rep:'clarke',acct:'A & R Glass Inc',only:['CHS'],note:'Wilmington, NC customer. Coral Springs quotes and sales under this name belong to a different A & R Glass in Miami and are left off.'}];
+const FAC_NAMES={CHS:'Charleston',CS:'Coral Springs',ATL:'Atlanta',LPG:'Louisville',NN:'Newport News',ORL:'Orlando'};
+function facCode(v){const t=String(v??'').trim().toLowerCase().replace(/[^a-z ]+/g,' ').replace(/\s+/g,' ').trim();if(!t||t.length>20)return '';
+  const M={chs:'CHS','chs sc':'CHS',charleston:'CHS',cs:'CS','cs fl':'CS','coral springs':'CS',atl:'ATL','atl ga':'ATL',atlanta:'ATL',lpg:'LPG','lpg ky':'LPG',louisville:'LPG',nn:'NN','nn va':'NN','newport news':'NN',orl:'ORL','orl fl':'ORL',orlando:'ORL'};return M[t]||''}
+function facRule(name){const rk=nkey(($('#repName')&&$('#repName').value)||'');if(!rk)return null;return FAC_RULES.find(r=>rk.includes(nkey(r.rep))&&nkey(r.acct)===nkey(name))||null}
+const facOk=(name,fac)=>{const r=facRule(name),c=facCode(fac);return !r||!c||r.only.includes(c)};
+function quoteFac(x){for(const v of Object.values((x&&x.x)||{})){const c=facCode(v);if(c)return c}return ''}
 /* combine everything loaded into one SALES model */
 function composeSales(){
   const mons=SFILES.filter(f=>f.kind==='monthly');
@@ -1111,6 +1120,7 @@ async function onSalesFiles(files){
       for(const n of order){try{const g=parseAnyGrid(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:''}));g.sheet=n;const sc=x=>(x.kind==='monthly'||(x.months&&x.months.length)?1e7:0)+(x.rows||[]).length;if(!got||sc(g)>sc(got))got=g}catch(e){last=e}}
       if(!got)throw last; got.file=f.name;
       got.fac=fileFac(f.name);
+      if(Array.isArray(got.rows)&&facCode(got.fac))got.rows=got.rows.filter(r=>facOk(r.name,got.fac));
       if(got.kind==='monthly'){got.div=fileDiv(f.name);SFILES=SFILES.filter(x=>!(x.kind==='monthly'&&x.file===got.file))}
       else if(got.kind!=='erp')SFILES=SFILES.filter(x=>x.kind!==got.kind);
       else SFILES=SFILES.filter(x=>!(x.kind==='erp'&&+x.end===+got.end&&+x.start===+got.start&&(x.fac||'')===(got.fac||'')));
@@ -1265,7 +1275,7 @@ $('#fileList').addEventListener('change',async e=>{const f=e.target.files[0];if(
   $('#acctList').value=names.join('\n');countList();$('#stList').innerHTML=`<span class="pos">${esc(f.name)}: ${new Set(names).size} account names loaded${cc>=0?' with customer numbers':''}. Click Build review.</span>`;$('#dropList').classList.add('ok')}catch(err){$('#stList').innerHTML=`<span class="neg">${esc(err.message||err)}</span>`}});
 function matchQuotes(accounts,Q,P='q'){
   const byKey=new Map(accounts.map(a=>[nkey(a.name),a])), at=accounts.map(a=>({a,t:toks(a.name)}));let unm=0;
-  for(const r of Q.rows){
+  for(let r of Q.rows){
     r._hit=false;
     let hit=byKey.get(nkey(r.name));
     if(!hit){const t=toks(r.name);let best=0,tie=false;
@@ -1275,6 +1285,11 @@ function matchQuotes(accounts,Q,P='q'){
       if(best<.6||tie)hit=null}
     if(!hit){unm++;continue}
     r._hit=true;
+    if(r.list&&facRule(hit.name)){const keep=r.list.filter(x=>facOk(hit.name,quoteFac(x)));
+      if(keep.length!==r.list.length){if(!keep.length){r._hit=false;continue}
+        const sum=keep.reduce((t,x)=>t+(x.amt||0),0),k=r.total>0?sum/r.total:0,m={};let off=0;
+        keep.forEach(x=>{if(x.d){const d=new Date(x.d),mk=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');m[mk]=(m[mk]||0)+(x.amt||0)}else off+=x.amt||0});
+        r={...r,list:keep,total:sum,open:sum,n:keep.length,m,off,cats:Object.fromEntries(Object.entries(r.cats||{}).map(([c,v])=>[c,v*k]))}}}
     const q=hit[P]||(hit[P]={total:0,open:0,won:0,lost:0,closed:0,nWon:0,nLost:0,nOpen:0,n:0,off:0,m:{},cats:{},comps:{},lostWhy:{}});
     if(r.list)q.list=(q.list||[]).concat(r.list);
     q.total+=r.total;q.open+=r.open;q.won+=r.won;q.n+=r.n;q.off+=r.off;['lost','closed','nWon','nLost','nOpen'].forEach(k=>q[k]+=r[k]||0);for(const k in r.comps||{})q.comps[k]=(q.comps[k]||0)+r.comps[k];for(const k in r.lostWhy||{})q.lostWhy[k]=(q.lostWhy[k]||0)+r.lostWhy[k];
@@ -2030,7 +2045,7 @@ function mergeMonthly(mons){
   const byCode=new Map(),byName=new Map(),rows=[],divs=new Set();
   for(const f of mons){
     const local=new Map();
-    for(const r of f.rows){const div=r.div||f.div||'';if(div)divs.add(div);
+    for(const r of f.rows){if(f.fac&&!facOk(r.name,f.fac))continue;const div=r.div||f.div||'';if(div)divs.add(div);
       let x=(r.code&&byCode.get(r.code.toUpperCase()))||byName.get(nkey(r.name));
       if(!x){x={name:r.name,code:r.code||'',route:r.route||'',m:{},md:{}};rows.push(x)}
       if(r.code&&!x.code)x.code=r.code;if(r.route&&!x.route)x.route=r.route;
@@ -2087,6 +2102,7 @@ function acctDetailHTML(a){
   return `<div class="ad">
   <header class="ad-head">
     <div class="ad-id"><div class="row" style="gap:6px"><span class="chip p${a.priority}">P${a.priority}</span><span class="tier ${a.tier}" title="${tierTip(a.tier)}">${a.tier}</span><span class="chip ${a.trend}">${a.trend}</span>${nbChip(a)}${rn?`<span class="kicker">${esc(rn)}</span>`:''}</div><h2>${esc(a.name)}</h2>
+    ${(()=>{const fr=facRule(a.name);return fr?`<div class="ad-sub"><b>${esc(fr.only.map(c=>FAC_NAMES[c]||c).join(', '))} only.</b> ${esc(fr.note)}</div>`:''})()}
     <div class="ad-sub">${a.calls[0]?.contact?`Contact: ${esc(a.calls[0].contact)} · `:''}Last visit: ${a.lastDate?fmtDate(a.lastDate)+(a.days!=null?` (${a.days} days ago)`:''):'<span class="neg">none logged</span>'}</div></div>
     <div class="row">${pick(a)}</div>
   </header>
