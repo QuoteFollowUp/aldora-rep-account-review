@@ -699,7 +699,7 @@ body.rep-view .sync-line,body.rep-view .sync-log{display:none!important}
         <button id="switchCode" type="button">Use a different code</button>
       </div>
       <span class="status muted" id="saveInfo"></span>
-      <span class="muted" style="font-size:.72rem;letter-spacing:.06em"><span data-appver>Version 2026-11-18c</span></span>
+      <span class="muted" style="font-size:.72rem;letter-spacing:.06em"><span data-appver>Version 2026-11-18d</span></span>
       <form id="codeForm" class="codeform" hidden autocomplete="off">
         <label for="codeIn" class="kicker">Access code</label>
         <input id="codeIn" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Enter your code">
@@ -946,9 +946,6 @@ const FAC_RULES=[{rep:'clarke',acct:'A & R Glass Inc',only:['CHS'],note:'Wilming
 const FAC_NAMES={CHS:'Charleston',CS:'Coral Springs',ATL:'Atlanta',LPG:'Louisville',NN:'Newport News',ORL:'Orlando'};
 function facCode(v){const t=String(v??'').trim().toLowerCase().replace(/[^a-z ]+/g,' ').replace(/\s+/g,' ').trim();if(!t||t.length>20)return '';
   const M={chs:'CHS','chs sc':'CHS',charleston:'CHS',cs:'CS','cs fl':'CS','coral springs':'CS',atl:'ATL','atl ga':'ATL',atlanta:'ATL',lpg:'LPG','lpg ky':'LPG',louisville:'LPG',nn:'NN','nn va':'NN','newport news':'NN',orl:'ORL','orl fl':'ORL',orlando:'ORL'};return M[t]||''}
-/* Call log names that belong to a set account for a rep (a link set in the app still wins). */
-const CALL_ALIASES=[{rep:'clarke',call:'Island Glass and Mirror',acct:'5 Island Glass and Mirror'},{rep:'clarke',call:'Island Glass & Mirror',acct:'5 Island Glass and Mirror'}];
-function callAlias(name){const rk=nkey(($('#repName')&&$('#repName').value)||'');if(!rk)return '';const r=CALL_ALIASES.find(x=>rk.includes(nkey(x.rep))&&nkey(x.call)===nkey(name));return r?r.acct:''}
 function facRule(name){const rk=nkey(($('#repName')&&$('#repName').value)||'');if(!rk)return null;return FAC_RULES.find(r=>rk.includes(nkey(r.rep))&&nkey(r.acct)===nkey(name))||null}
 const facOk=(name,fac)=>{const r=facRule(name),c=facCode(fac);return !r||!c||r.only.includes(c)};
 function quoteFac(x){for(const v of Object.values((x&&x.x)||{})){const c=facCode(v);if(c)return c}return ''}
@@ -1396,7 +1393,6 @@ function matchCalls(accounts,calls){
     if(AL[c.customer]==='__hide'){(HIDDEN[c.customer]=HIDDEN[c.customer]||[]).push(c);continue}
     const ov=AL[callId(c)];
     if(ov){if(ov==='__none'){(unmatched[c.customer]=unmatched[c.customer]||[]).push(c);continue}if(byName[ov]){byName[ov].calls.push(c);continue}}
-    {const bt=!AL[c.customer]&&callAlias(c.customer);if(bt&&byName[bt]){byName[bt].calls.push(c);continue}}
     let hit=cache[c.customer];
     if(hit===undefined&&AL[c.customer]){hit=AL[c.customer]==='__none'?null:(byName[AL[c.customer]]||undefined);if(hit!==undefined){cache[c.customer]=hit;if(!hit){(unmatched[c.customer]=unmatched[c.customer]||[]).push(c);continue}}}
     if(hit===undefined){
@@ -2350,7 +2346,7 @@ function callsForRep(all,repName){
   CALLS=others.map(c=>({...c}));const keepOC=$('#onlyCalled').checked;$('#onlyCalled').checked=false;
   let extra=[];try{const T=build();const AL=getAliases();const nn=x=>String(x).toLowerCase().replace(/[^a-z0-9]/g,'');
     T.accounts.forEach(a=>a.calls.forEach(c=>{const t=toks(c.customer),u=toks(a.name),inter=[...t].filter(w=>u.has(w)).length,small=Math.min(t.size,u.size);
-      if(nn(c.customer)===nn(a.name)||AL[c.customer]===a.name||AL[callId(c)]===a.name||(small>=2&&inter===small)||(inter/new Set([...t,...u]).size>=.75))extra.push(c)}))}catch(e){}
+      if(nn(c.customer)===nn(a.name)||AL[c.customer]===a.name||AL[callId(c)]===a.name||(small>=2&&inter===small)||(small>=2&&inter/new Set([...t,...u]).size>=.75))extra.push(c)}))}catch(e){}
   $('#onlyCalled').checked=keepOC;
   const seen=new Set(mine.map(callId));extra=extra.filter(c=>!seen.has(callId(c)));
   return {calls:[...mine,...extra],fromOthers:extra.length};
