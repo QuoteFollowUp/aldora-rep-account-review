@@ -156,7 +156,7 @@
   };
   var GO = readGo(window.__rarStartHash);
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
-  var nameKey = function (s) { return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\b(inc|llc|co|corp|corporation|company|ltd|the)\b/g, " ").replace(/\s+/g, " ").trim(); };
+  var nameKey = function (s) { return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\bisland glass\s*,?\s*ltd\b/g, " island glass limited ").replace(/\b(inc|llc|co|corp|corporation|company|ltd|the)\b/g, " ").replace(/\s+/g, " ").trim(); };
   function sameRep(a, b) {
     var t = function (x) { x = String(x || ""); if (x.indexOf(",") >= 0) x = x.split(",").reverse().join(" "); return x.toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(Boolean); };
     var A = t(a), B = t(b);
@@ -289,7 +289,7 @@
   var HUB = "https://aldora-sales-hub.netlify.app";
   var g = function (expr) { try { return (0, eval)(expr); } catch (e) { return undefined; } };
   var key = function (s) { return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ")
-    .replace(/\b(inc|llc|co|corp|corporation|company|ltd|the)\b/g, " ").replace(/\s+/g, " ").trim(); };
+    .replace(/\bisland glass\s*,?\s*ltd\b/g, " island glass limited ").replace(/\b(inc|llc|co|corp|corporation|company|ltd|the)\b/g, " ").replace(/\s+/g, " ").trim(); };
   var state = { open: false, code: "", pend: {}, gone: {}, at: 0 };
 
   function code() { var S = g('typeof STORE !== "undefined" ? STORE : null'); return S && S.code ? S.code : ""; }
@@ -400,7 +400,7 @@
   var HUB = "https://aldora-sales-hub.netlify.app";
   var g = function (expr) { try { return (0, eval)(expr); } catch (e) { return undefined; } };
   var key = function (s) { return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ")
-    .replace(/\b(inc|llc|co|corp|corporation|company|ltd|the|dba)\b/g, " ").replace(/\s+/g, ""); };
+    .replace(/\bisland glass\s*,?\s*ltd\b/g, " island glass limited ").replace(/\b(inc|llc|co|corp|corporation|company|ltd|the|dba)\b/g, " ").replace(/\s+/g, ""); };
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
   var money = function (n) { return n ? "$" + Math.round(n).toLocaleString() : ""; };
 

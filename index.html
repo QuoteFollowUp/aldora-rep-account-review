@@ -699,7 +699,7 @@ body.rep-view .sync-line,body.rep-view .sync-log{display:none!important}
         <button id="switchCode" type="button">Use a different code</button>
       </div>
       <span class="status muted" id="saveInfo"></span>
-      <span class="muted" style="font-size:.72rem;letter-spacing:.06em"><span data-appver>Version 2026-11-18a</span></span>
+      <span class="muted" style="font-size:.72rem;letter-spacing:.06em"><span data-appver>Version 2026-11-18b</span></span>
       <form id="codeForm" class="codeform" hidden autocomplete="off">
         <label for="codeIn" class="kicker">Access code</label>
         <input id="codeIn" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Enter your code">
@@ -941,7 +941,8 @@ function parseAnyGrid(grid){
 const fmtD=d=>d?`${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`:'?';
 const nkey=s=>String(s).toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]/g,'');
 /* Accounts tied to one facility. Another company with the same name at a different facility stays off this rep's review. */
-const FAC_RULES=[{rep:'clarke',acct:'A & R Glass Inc',only:['CHS'],note:'Wilmington, NC customer. Coral Springs quotes and sales under this name belong to a different A & R Glass in Miami and are left off.'}];
+const FAC_RULES=[{rep:'clarke',acct:'A & R Glass Inc',only:['CHS'],note:'Wilmington, NC customer. Coral Springs quotes and sales under this name belong to a different A & R Glass in Miami and are left off.'},
+  {rep:'clarke',acct:'Island Glass, LLC',only:['CHS'],note:'Charleston customer. Island Glass, Ltd buys through Coral Springs and Orlando and belongs to Ben Gless, so those quotes and sales are left off.'}];
 const FAC_NAMES={CHS:'Charleston',CS:'Coral Springs',ATL:'Atlanta',LPG:'Louisville',NN:'Newport News',ORL:'Orlando'};
 function facCode(v){const t=String(v??'').trim().toLowerCase().replace(/[^a-z ]+/g,' ').replace(/\s+/g,' ').trim();if(!t||t.length>20)return '';
   const M={chs:'CHS','chs sc':'CHS',charleston:'CHS',cs:'CS','cs fl':'CS','coral springs':'CS',atl:'ATL','atl ga':'ATL',atlanta:'ATL',lpg:'LPG','lpg ky':'LPG',louisville:'LPG',nn:'NN','nn va':'NN','newport news':'NN',orl:'ORL','orl fl':'ORL',orlando:'ORL'};return M[t]||''}
@@ -1341,7 +1342,7 @@ function regionOf(route){
 
 /* ---------- name matching ---------- */
 const STOP=new Set(['inc','llc','co','company','corp','corporation','the','of','and','dba','glass','mirror','ltd','formerly','formely']);
-const toks=s=>new Set(String(s).toLowerCase().replace(/&/g,' and ').replace(/\(.*?\)/g,' ').replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w=>w&&!STOP.has(w)));
+const toks=s=>new Set(String(s).toLowerCase().replace(/\bisland glass\s*,?\s*ltd\b/g,' island limited ').replace(/&/g,' and ').replace(/\(.*?\)/g,' ').replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w=>w&&!STOP.has(w)));
 const aliasKey=()=>'rar-aliases:'+($('#repName').value.trim()||'_');
 function getAliases(){try{const v=localStorage.getItem(aliasKey());if(v!==null)return JSON.parse(v)||{};return STORE.mode==='cloud'?{}:JSON.parse(localStorage.getItem('rar-aliases')||'{}')}catch(e){return{}}}
 function putAliases(a){try{localStorage.setItem(aliasKey(),JSON.stringify(a||{}))}catch(e){}}
