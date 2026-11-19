@@ -1342,7 +1342,7 @@ function regionOf(route){
 
 /* ---------- name matching ---------- */
 const STOP=new Set(['inc','llc','co','company','corp','corporation','the','of','and','dba','glass','mirror','ltd','formerly','formely']);
-const toks=s=>new Set(String(s).toLowerCase().replace(/\bisland glass\s*,?\s*ltd\b/g,' island limited ').replace(/\briverside glass\s*(?:&|and)?\s*mirror\s*,?\s*llc\b/g,' riverside georgia ').replace(/&/g,' and ').replace(/\(.*?\)/g,' ').replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w=>w&&!STOP.has(w)));
+const toks=s=>new Set(String(s).toLowerCase().replace(/\bisland glass\s*,?\s*ltd\b/g,' island limited ').replace(/\briverside glass\s*(?:&|and)?\s*mirror\s*,?\s*llc\b/g,' riverside georgia ').replace(/\bj\s*(?:&|and)?\s*l glass\s*,?\s*llc\b/g,' jl christian ').replace(/&/g,' and ').replace(/\(.*?\)/g,' ').replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w=>w&&!STOP.has(w)));
 const aliasKey=()=>'rar-aliases:'+($('#repName').value.trim()||'_');
 function getAliases(){try{const v=localStorage.getItem(aliasKey());if(v!==null)return JSON.parse(v)||{};return STORE.mode==='cloud'?{}:JSON.parse(localStorage.getItem('rar-aliases')||'{}')}catch(e){return{}}}
 function putAliases(a){try{localStorage.setItem(aliasKey(),JSON.stringify(a||{}))}catch(e){}}
